@@ -8,7 +8,8 @@ pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', None)
 
 # Load csv into a dataframe.
-df = pd.read_csv('AMD_15m_2022-06-07_2022-07-07.csv')
+filename = 'AMD_15m_2022-06-07_2022-07-07.csv'
+df = pd.read_csv(filename)
 df.columns.values[0] = "Date"
 
 # Convert time column string back to datetime object
@@ -48,4 +49,5 @@ if resampled_df is not None:
     print(resampled_df)
 
     # Save the downsampled data.
-    filename =  
+    new_filename = "RESAMPLED_TO_" + target_resolution + "_" + filename
+    resampled_df.to_csv(new_filename, index=True)
