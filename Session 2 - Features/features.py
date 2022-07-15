@@ -1,4 +1,6 @@
 from dateutil.relativedelta import relativedelta
+import matplotlib.gridspec as gridspec
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from datetime import datetime
 from time import sleep
@@ -16,7 +18,7 @@ pd.set_option('display.max_colwidth', None)
 TIMEFRAMES = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]
 INTRADAILY_TIMEFRAMES = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"]
 
-SYMBOLS = ["GOOGL", "AMZN", "XOM"]  # "WMT", "JPM", "NVDA", "BRK-A", "UNH", "JNJ", "TSLA"]
+SYMBOLS = ["GOOGL", "AMZN", "XOM", "WMT", "JPM", "NVDA", "BRK-A", "UNH", "JNJ", "TSLA"]
 
 
 def load_local_data(symbols: list) -> dict:
@@ -49,6 +51,7 @@ def load_local_data(symbols: list) -> dict:
 
             df = pd.read_csv(filename)
             df.columns.values[0] = "Date"
+            df["Date"] = pd.to_datetime(df["Date"])
             df.set_index("Date", inplace=True)
 
             data[symbol][timeframe] = df
@@ -166,11 +169,12 @@ def apply_features_all_datasets(root: dict) -> None:
             root[symbol][timeframe] = root[symbol][timeframe].assign(SMA10=f1, EMA20=f2, ATR=f3)
 
 
-def correlation_matrix(symbols: list, timeframe: list) -> pd.DataFrame:
+def correlation_matrix(root: dict, symbols: list, timeframe: str) -> pd.DataFrame:
     """
-    Generates and applies features to all existing datasets.
+    Create correlation matrix for the given symbols.
 
     Args:
+        root: nested dict of dataframes as formatted by load_local_data().
         symbols: list of ticker codes to assess.
         timeframe: timeframe to assess.
 
@@ -181,7 +185,29 @@ def correlation_matrix(symbols: list, timeframe: list) -> pd.DataFrame:
         None.
     """
 
-    pass
+    # Add ticker code column to existing data.
+    for symbol in symbols:
+        root[symbol][timeframe]['Ticker'] = symbol
+        # print(root[symbol][timeframe])
+
+    # Aggregate close prices from all datasets into one.
+    # 'Date' series needs to be changed from index to column for the next step.
+    agg_data = pd.concat([root[s][timeframe] for s in symbols]).reset_index()
+    agg_data = agg_data[['Date', 'Ticker', 'Close']]
+    # print(agg_data)
+
+    # Use df.pivot to re-organise the data by column value.
+    # This turns our individual stocks into columns and flattens out the duplicated Date values.
+    # This is also why we needed to change 'Date' Series from index to column.
+    reorg_data = agg_data.pivot('Date', 'Ticker', 'Close').reset_index()
+    # print(reorg_data.head())
+
+    # Finally run pandas bultin correlation on the prepared data.
+    matrix = reorg_data.corr(method="pearson")
+    matrix.index.name = None
+    # print(matrix.head())
+
+    return matrix
 
 
 # # Fetch and store 3 datasets for each stock
@@ -204,25 +230,48 @@ data = load_local_data(SYMBOLS)
 # print("data['AMZN']['1d']:  ")
 # print(data['AMZN']['1d'])
 
-# Example: derive features from price data.
-# df = data['AMZN']['1d'].loc['2021-07-08':'2022-07-08']
-# sma = sma(df, period=10)
-# ema = ema(df, period=20)
-# atr = atr(df, period=14)
-# df = df.assign(SMA10=sma, EMA20=ema, ATR=atr)
+# Example: derive features from close prices and add to existing dataframe.
+# df = data['AMZN']['1d']  # whole dataset
+df = data['AMZN']['1d'].loc['2021-07-14':'2022-07-14']  # 1 year slice
+# df = data['AMZN']['1d'][-100:]  # last 100 bars slice
+sma = sma(df, period=10)
+ema = ema(df, period=20)
+atr = atr(df, period=14)
+df = df.assign(SMA10=sma, EMA20=ema, ATR=atr)
 # print(df)
 
-# Replicate for all datasets.
+# Example: replicate features across all datasets.
 # apply_features_all_datasets(data)
 
-# Example: check correlation of two instruments.
+# Example: Caclculate correlation matrix for all data.
+# correlations = correlation_matrix(data, SYMBOLS, '1d')
+# print(correlations)
 
+# Example: Access correlation of 2 particular symbols.
+# print(correlations.loc['AMZN', 'GOOGL'])
 
-# Example: plot with matplotlib.
-# fig, axes = plt.subplots()
-# df['Close'].plot(ax=axes, secondary_y=True)
-# atr.plot(ax=axes, subplots=True, color='red')
-# plt.show()
+# Example: plot Close and ATR with matplotlib.
+# 2 subplots are needed because Close and ATR share only 1 common axis ('Date')
+fig = plt.figure(figsize=(14, 10))
+fig.subplots_adjust(hspace=0.1)
+gs = gridspec.GridSpec(nrows=2, ncols=1, figure=fig, height_ratios=[2, 1])
 
+price_subplot = plt.subplot(gs[0, 0])
+price_subplot.plot(df.index, df['Close'], label="Daily close price", color='purple')
+price_subplot.plot(sma, color="lightblue", label="10 period SMA")
+price_subplot.legend(loc="upper right")
+price_subplot.set_ylabel("USD ($)")
+price_subplot.set_title("AMZN 1d Close with ATR and 10 period SMA")
+price_subplot.grid(b=True, linestyle='--', alpha=0.5)
+# price_subplot.get_xaxis().set_visible(False)
+price_subplot.margins(0.05, 0.2)
 
-# Example: plot with mplfinance.
+atr_subplot = plt.subplot(gs[1, 0], sharex=price_subplot)  # 2 rows, 1 col, 2nd.
+atr_subplot.plot(atr, label="ATR", color='orange')
+atr_subplot.legend(loc="upper right")
+atr_subplot.set_ylabel("ATR")
+atr_subplot.grid(b=True, linestyle='--', alpha=0.5)
+atr_subplot.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%b'))
+atr_subplot.margins(0.05, 0.2)
+
+plt.show()
