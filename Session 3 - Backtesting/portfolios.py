@@ -23,20 +23,20 @@ class TestPortfolio():
             "EQUITIES": ["GOOGL", "AMZN", "TSLA", "F"],
             "CURRENCIES": ["EURUSD=X", "GBPUSD=X", "AUDUSD=X"],
             "COMMODITIES": ["GC=F", "ZO=F", "ZS=F", "KC=F"],
-            "INDICES": ["^VIX", "^AXJO", "^GSPC", "^KS11"],
-            "CRPYTO": []
+            "INDICES": ["^VIX", "^AXJO", "^GSPC", "^KS11", "DX-Y.NYB"],
+            "CRPYTO": ["BTC-USD"]
         }
 
         self.assets_flattened = [i for j in self.assets.values() for i in j]
 
         # Percentage of portfolio starting balance.
-        self.equities_allocation = 25
-        self.currencies_allocation = 25
-        self.commodities_allocation = 25
-        self.indices_allocation = 25
-        self.crypto_allocation = 0
+        self.equities_allocation = 20
+        self.currencies_allocation = 20
+        self.commodities_allocation = 20
+        self.indices_allocation = 20
+        self.crypto_allocation = 20
 
-        # Percentage of asset class allocation.
+        # Percentage of asset class allocation to use for each strategy.
         self.strategy_allocations = {
             "EQUITIES": {
                 EMACross50200: 100,
@@ -56,7 +56,7 @@ class TestPortfolio():
         }
 
         if self.equities_allocation + self.currencies_allocation + self.commodities_allocation + self.indices_allocation + self.crypto_allocation != 100:
-            raise ValueError("Asset class allocations must total 100")
+            raise ValueError("Asset class allocations must total 100.")
 
         if self.acceptable_correlation_threshold < -1 or self.acceptable_correlation_threshold > 1:
             raise ValueError("Acceptable correlation value must be between -1 and 1.")
