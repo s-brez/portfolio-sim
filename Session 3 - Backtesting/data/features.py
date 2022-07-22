@@ -22,8 +22,9 @@ ASSET_CLASSES = ["EQUITIES", "CURRENCIES", "COMMODITIES", "INDICES"]
 EQUITIES = ["GOOGL", "AMZN", "XOM", "WMT", "JPM", "NVDA", "AMD", "AAL", "F", "BRK-A", "UNH", "JNJ", "TSLA", "LKO"]
 CURRENCIES = ["EURUSD=X", "EURAUD=X", "USDJPY=X", "GBPUSD=X", "USDCHF=X", "USDCAD=X", "AUDUSD=X", "NZDUSD=X"]
 COMMODITIES = ["GC=F", "SI=F", "CL=F", "BZ=F", "NG=F", "PL=F", "PL=F", "ZO=F", "ZS=F", "KC=F", "KE=F", "ZC=F", "CT=F"]
-INDICES = ["^IXIC", "^AORD", "^DJI", "^AXJO", "^GSPC", "^KS11", "IMOEX.ME", "^N225", "^VIX", "399001.SZ"]
-SYMBOLS = EQUITIES + CURRENCIES + COMMODITIES + INDICES
+INDICES = ["DX-Y.NYB", "^IXIC", "^AORD", "^DJI", "^AXJO", "^GSPC", "^KS11", "IMOEX.ME", "^N225", "^VIX", "399001.SZ"]
+CRPYTO = ["BTC-USD"]
+SYMBOLS = EQUITIES + CURRENCIES + COMMODITIES + INDICES + CRPYTO
 
 
 def load_local_data(symbols: list) -> dict:
@@ -236,8 +237,8 @@ def correlation_matrix(root: dict, symbols: list, timeframe: str) -> pd.DataFram
 # Note: Run this once to fetch data initially. Use local data thereon.
 # for symbol in SYMBOLS:
 
-    # # 10 years, daily resolution
-    # fetch_historical_data(symbol, "1d", 10, save=True)
+    # # 7 years, daily resolution
+    # fetch_historical_data(symbol, "1d", 7, save=True)
 
     # # 45 days, hourly resolution
     # fetch_historical_data(symbol, "1h", 45, save=True)
@@ -247,15 +248,15 @@ def correlation_matrix(root: dict, symbols: list, timeframe: str) -> pd.DataFram
 
 
 # Load stored datasets
-data = load_local_data(SYMBOLS)
-print("data[]:                          ", list(data.keys()))
-print("data[EQUITIES]:                  ", list(data["EQUITIES"].keys()))
-print("data[CURRENCIES]:                ", list(data["CURRENCIES"].keys()))
-print("data[COMMODITIES]:               ", list(data["COMMODITIES"].keys()))
-print("data[INDICES]:                   ", list(data["INDICES"].keys()))
-print("data['EQUITIES']['AMZN']:        ", list(data["EQUITIES"]["AMZN"].keys()))
-print("data['EQUITIES']['AMZN']['1d']:  ")
-print(data["EQUITIES"]['AMZN']['1d'].head())
+# data = load_local_data(SYMBOLS)
+# print("data[]:                          ", list(data.keys()))
+# print("data[EQUITIES]:                  ", list(data["EQUITIES"].keys()))
+# print("data[CURRENCIES]:                ", list(data["CURRENCIES"].keys()))
+# print("data[COMMODITIES]:               ", list(data["COMMODITIES"].keys()))
+# print("data[INDICES]:                   ", list(data["INDICES"].keys()))
+# print("data['EQUITIES']['AMZN']:        ", list(data["EQUITIES"]["AMZN"].keys()))
+# print("data['EQUITIES']['AMZN']['1d']:  ")
+# print(data["EQUITIES"]['AMZN']['1d'].head())
 
 
 # print(data)
