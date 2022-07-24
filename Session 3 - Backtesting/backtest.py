@@ -1,6 +1,5 @@
 from os import listdir
 import pandas as pd
-import sys
 
 # pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
@@ -20,7 +19,6 @@ CRYPTO = ["BTC-USD"]
 SYMBOLS = EQUITIES + CURRENCIES + COMMODITIES + INDICES + CRYPTO
 
 
-# Backtester implementation.
 class Backtester:
 
     def __init__(self, portfolio):
@@ -136,7 +134,7 @@ class Backtester:
 
         print("Feature data complete.")
 
-    def correlation_matrix(self, root: dict, timeframes: list, symbols: list) -> None:
+    def correlation_matrix(self, root: dict, timeframes: list, symbols: list) -> pd.DataFrame:
         """
         Create correlation matrix from source datasets.
 
@@ -182,8 +180,32 @@ class Backtester:
 
         return c_matrix
 
-    def action_signal(self, signal: dict):
-        # print(signal)
+    def process_signal(self, signal: dict):
+
+        # Check if a position for the symbol already exists.
+        try:
+            existing_position = self.portfolio.positions[signal['symbol']]
+        except KeyError:
+            existing_position = None
+
+        # If yes: if opposing direction, close trade. If not, do nothing.
+        # Consider adding compounding behaviour here for risk-free positions.
+        if existing_position:
+            if existing_position['direction'] != signal['direction']:
+                self.close_position(signal)
+
+        # If no: open a position if trade would be within allocation and risk limits.
+        else:
+            if self.within_limits(signal):
+                self.open_position(signal)
+
+    def within_limits(self, signal: dict) -> None:
+        pass
+
+    def open_position(self, signal) -> None:
+        pass
+
+    def close_position(self, signal) -> None:
         pass
 
     def start(self, start_timestamp=None, finish_timestamp=None):
@@ -192,9 +214,11 @@ class Backtester:
         no missing timestamps, start and finish on same timestamps.
 
         Limitations:
-            - Simulation supports only a single timeframe across all strategies.
-            - Features requiring analysis of > 1 bar time periods must be condensed into a single bar.
+            - Simulation supports only a single timeframe across all strategies (multiple strategies supported).
+            - Features requiring analysis of > 1 unit periods must have outputs condensed into a single unit.
                 see EmaCross50200 for example using Cross column.
+            - Detection of resting order triggers not implemented, reliant on discrete BUY/SELL signals.
+            - Partial closures/take profit orders not supported.
         """
 
         # Data pre-processing.
@@ -223,6 +247,8 @@ class Backtester:
             for asset_class in self.portfolio.assets:
                 for symbol in self.portfolio.assets[asset_class]:
 
+                    # Positions can be opened and closed two ways depending on the strategy:
+                    # 1. Directly with a buy/sell signal, as derived from feature data during pre-processing
                     for strategy in self.portfolio.strategies:
                         signal = strategy.check_for_signal(
                             self.data[asset_class][symbol][strategy.timeframe].iloc[index])
@@ -231,4 +257,10 @@ class Backtester:
                             signal['symbol'] = symbol
                             signal['timeframe'] = strategy.timeframe
                             signal['strategy'] = strategy.name
-                            self.action_signal(signal)
+                            self.process_signal(signal)
+
+                    # 2. If price crosses a resting limit order.
+                    # (Not implemented for this example)
+                    signals = self.portfolio.update_price()
+                    if signals:
+                        map(self.process_signal, signals)
