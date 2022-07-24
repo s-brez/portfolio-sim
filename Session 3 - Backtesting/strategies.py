@@ -5,6 +5,7 @@ class EMACross50200:
 
     name = "EMACross50200"
     timeframe = "1d"
+    p_win = {}  # p_win[symbol][timeframe] ..
 
     def feature_data(data: pd.DataFrame, slow=200, fast=50) -> [pd.Series]:
         """
@@ -48,10 +49,24 @@ class EMACross50200:
         return signal
 
 
+class MeanReversion:
+
+    name = "MeanReversion"
+    timeframe = "1d"
+    p_win = {}  # p_win[symbol][timeframe]
+
+    def feature_data(data: pd.DataFrame, ) -> [pd.Series]:
+        pass
+
+    def check_for_signal():
+        pass
+
+
 class EMACross1020:
 
     name = "EMACross1020"
     timeframe = "1d"
+    p_win = {}  # p_win[symbol][timeframe]
 
     def feature_data(data: pd.DataFrame, slow=20, fast=10) -> [pd.Series]:
         return [
@@ -66,18 +81,7 @@ class BBSimple:
 
     name = "BBSimple"
     timeframe = "1d"
-
-    def feature_data(data: pd.DataFrame, ) -> [pd.Series]:
-        pass
-
-    def check_for_signal():
-        pass
-
-
-class MeanReversion:
-
-    name = "MeanReversion"
-    timeframe = "1d"
+    p_win = {}  # p_win[symbol][timeframe]
 
     def feature_data(data: pd.DataFrame, ) -> [pd.Series]:
         pass
