@@ -12,16 +12,24 @@ class TestPortfolio():
         self.currency = "USD"
         self.start_balance = 100000
         self.current_balance = 100000
-        self.positions = None
-        self.max_simultaneous_positions = 0
-        self.acceptable_correlation_threshold = 1
+        self.balance_history = {}
+
+        self.positions = {}                         # positions[symbol] ..
+        self.position_count = 0
+
+        self.simulated_fee_flat = 2                 # dollar value added to each trade cost
+        self.simulated_fee_percentage = 0.025       # percentage of trade size added to each trade cost
+
+        self.max_simultaneous_positions = 10
+        self.correlation_threshold = 1              # 1 for simplicity, allowing correlated trades
+        self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
 
         self.start_date = datetime.now() - relativedelta(years=5)
 
-        self.strategies = [EMACross50200]
-
         # This implementation is limited to one timeframe.
         self.timeframes = ["1d"]
+
+        self.strategies = [EMACross50200]
 
         self.assets = {
             "EQUITIES": ["GOOGL", "AMZN", "TSLA", "F"],
@@ -64,6 +72,13 @@ class TestPortfolio():
 
         if self.acceptable_correlation_threshold < -1 or self.acceptable_correlation_threshold > 1:
             raise ValueError("Acceptable correlation value must be between -1 and 1.")
+
+    def update_price() -> [dict]:
+        """
+        Return a list of signals if the price movement were to trigger resting orders, or None.
+        (Not implemented)
+        """
+        return None
 
     def summary(self) -> str:
         return (
