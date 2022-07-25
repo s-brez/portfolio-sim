@@ -26,7 +26,7 @@ class TestPortfolio():
 
         self.start_date = datetime.now() - relativedelta(years=5)
 
-        # This implementation is limited to one timeframe.
+        # This implementation is limited to supporting one timeframe.
         self.timeframes = ["1d"]
 
         self.strategies = [EMACross50200]
@@ -67,13 +67,18 @@ class TestPortfolio():
             },
         }
 
+        # Validate settings.
         if self.equities_allocation + self.currencies_allocation + self.commodities_allocation + self.indices_allocation + self.crypto_allocation != 100:
             raise ValueError("Asset class allocations must total 100.")
 
-        if self.acceptable_correlation_threshold < -1 or self.acceptable_correlation_threshold > 1:
+        for asset_class in self.strategy_allocations.keys():
+            if sum([i for i in self.strategy_allocations[asset_class].values()]) != 100:
+                raise ValueError("Strategy allocations per asset class must total 100.")
+
+        if self.correlation_threshold < -1 or self.correlation_threshold > 1:
             raise ValueError("Acceptable correlation value must be between -1 and 1.")
 
-    def update_price() -> [dict]:
+    def update_price(self) -> [dict]:
         """
         Return a list of signals if the price movement were to trigger resting orders, or None.
         (Not implemented)
@@ -86,7 +91,7 @@ class TestPortfolio():
             f"\nOpening balance: {self.start_balance} {self.currency}"
             f"\nStart date: {self.start_date}]"
             f"\nMax open positions allowed: {self.max_simultaneous_positions}"
-            f"\nMax allowable correlation between positions: {self.acceptable_correlation_threshold}"
+            f"\nMax allowable correlation between positions: {self.correlation_threshold}"
             f"\nTarget instruments: {json.dumps(self.assets, indent=2)}"
             f"\n\nAllocations per asset class (% of portfolio balance):"
             f"\nEquities: {self.equities_allocation}"
