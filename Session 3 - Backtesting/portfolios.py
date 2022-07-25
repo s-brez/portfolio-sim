@@ -1,5 +1,6 @@
 from dateutil.relativedelta import relativedelta
 from datetime import datetime
+import pandas as pd
 import json
 
 from strategies import EMACross50200
@@ -12,9 +13,8 @@ class TestPortfolio():
         self.currency = "USD"
         self.start_balance = 100000
         self.current_balance = 100000
-        self.balance_history = {}
 
-        self.positions = {}                         # positions[symbol] ..
+        self.positions = {}                         # positions[symbol][strategy] ..
         self.position_count = 0
 
         self.simulated_fee_flat = 2                 # dollar value added to each trade cost
@@ -23,6 +23,8 @@ class TestPortfolio():
         self.max_simultaneous_positions = 10
         self.correlation_threshold = 1              # 1 for simplicity, allowing correlated trades
         self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
+
+        self.max_risk_per_trade_percentage = 1      # max loss per trade, for when not using kelly fraction.
 
         self.start_date = datetime.now() - relativedelta(years=5)
 
@@ -40,48 +42,91 @@ class TestPortfolio():
         }
 
         self.assets_flattened = [i for j in self.assets.values() for i in j]
+        self.transaction_history = {i: [] for i in self.assets_flattened}  # tx_history[symbol] ..
 
-        # Percentage of portfolio starting balance.
-        self.equities_allocation = 20
-        self.currencies_allocation = 20
-        self.commodities_allocation = 20
-        self.indices_allocation = 20
-        self.crypto_allocation = 20
-
-        # Percentage of asset class allocation to use for each strategy.
-        self.strategy_allocations = {
+        # Asset class allocations across all asset classes must total 100.
+        # Likewise strategy allocations within each asset class must total 100.
+        self.allocations = {
             "EQUITIES": {
-                EMACross50200.name: 100,
+                "allocation": 20,
+                "in_use": 0,
+                "strategy_allocations": {
+                    EMACross50200.name: {
+                        "allocation": 100,
+                        "in_use": 0
+                    }
+                }
             },
             "CURRENCIES": {
-                EMACross50200.name: 100,
+                "allocation": 20,
+                "in_use": 0,
+                "strategy_allocations": {
+                    EMACross50200.name: {
+                        "allocation": 100,
+                        "in_use": 0
+                    }
+                }
             },
             "COMMODITIES": {
-                EMACross50200.name: 100,
+                "allocation": 20,
+                "in_use": 0,
+                "strategy_allocations": {
+                    EMACross50200.name: {
+                        "allocation": 100,
+                        "in_use": 0
+                    }
+                }
             },
-            "INDICES": {
-                EMACross50200.name: 100,
+            "INDICIES": {
+                "allocation": 20,
+                "in_use": 0,
+                "strategy_allocations": {
+                    EMACross50200.name: {
+                        "allocation": 100,
+                        "in_use": 0
+                    }
+                }
             },
             "CRYPTO": {
-                EMACross50200.name: 100,
-            },
+                "allocation": 20,
+                "in_use": 0,
+                "strategy_allocations": {
+                    EMACross50200.name: {
+                        "allocation": 100,
+                        "in_use": 0
+                    }
+                }
+            }
         }
 
         # Validate settings.
-        if self.equities_allocation + self.currencies_allocation + self.commodities_allocation + self.indices_allocation + self.crypto_allocation != 100:
-            raise ValueError("Asset class allocations must total 100.")
+        if sum([i["allocation"] for i in self.allocations.values()["allocation"]]) != 100:
+            raise ValueError("Asset class allocation must total 100.")
 
-        for asset_class in self.strategy_allocations.keys():
-            if sum([i for i in self.strategy_allocations[asset_class].values()]) != 100:
-                raise ValueError("Strategy allocations per asset class must total 100.")
+        for asset_class in self.allocations.values():
+            if sum([i for i in asset_class["strategy_allocations"].values()['allocation']]) != 100:
+                raise ValueError("Strategy allocation per asset class must total 100.")
 
         if self.correlation_threshold < -1 or self.correlation_threshold > 1:
             raise ValueError("Acceptable correlation value must be between -1 and 1.")
 
-    def update_price(self) -> [dict]:
+    def calculate_position_size(self, signal: dict) -> int:
         """
-        Return a list of signals if the price movement were to trigger resting orders, or None.
-        (Not implemented)
+        If p_win is set for the strategy, return a kelly fraction.
+        Otherwise use self.max_risk_per_trade_percentage to find the size.
+        """
+        return 346
+
+    def update_price(self, bar: pd.Series) -> dict:
+        """
+        If a resting limit or stop limit entry order is triggered, return a signal.
+        If a stop loss order is triggered, dont return a a signal, just close the position.
+        if a partial take-profit order is triggered, dont return a signal, just modify position.
+        if a final take-profit order is triggered, dont return a signal, just clost the position.
+
+        This implementation is limited to checking only for stops, as our example
+        strategies rely on separate exit signals for take-profit/exit. Realistically you'd
+        need to check against every order scenario in use by your basket of strategies.
         """
         return None
 
@@ -89,15 +134,15 @@ class TestPortfolio():
         return (
             f"\n** {self.name} **"
             f"\nOpening balance: {self.start_balance} {self.currency}"
-            f"\nStart date: {self.start_date}]"
+            f"\nStart date: {self.start_date}"
+            f"\nTimeframes in use: {self.timeframes}"
+            f"\nStrategies in use: {self.strategies}"
             f"\nMax open positions allowed: {self.max_simultaneous_positions}"
             f"\nMax allowable correlation between positions: {self.correlation_threshold}"
+            f"\nSimulated flat transaction fee: {self.simulated_fee_flat}"
+            f"\nSimulated percentage transaction fee: {self.simulated_fee_percentage}"
+            f"\nMax allowable drawdown before trading ceases: {self.drawdown_limit_percentage}"
+            f"\nMax exposure per trade when not using a kelly fraction: {self.max_risk_per_trade_percentage}"
             f"\nTarget instruments: {json.dumps(self.assets, indent=2)}"
-            f"\n\nAllocations per asset class (% of portfolio balance):"
-            f"\nEquities: {self.equities_allocation}"
-            f"\nCurrencies: {self.currencies_allocation}"
-            f"\nCommodities: {self.commodities_allocation}"
-            f"\nIndicies: {self.indices_allocation}"
-            f"\nCrypto: {self.crypto_allocation}"
-            f"\n\nStrategy allocations per asset class: (% of asset class allocation) {json.dumps(self.strategy_allocations, indent=2)}"
+            f"\nAllocations: {json.dumps(self.allocations, indent=2)}"
         )
