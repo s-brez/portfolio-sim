@@ -11,8 +11,8 @@ class TestPortfolio():
     def __init__(self):
         self.name = "Test Portfolio"
         self.currency = "USD"
-        self.start_balance = 100000
-        self.current_balance = 100000
+        self.start_balance = 1000000
+        self.current_balance = 1000000
 
         self.positions = {}                         # positions[symbol][strategy] ..
         self.position_count = 0
@@ -24,14 +24,16 @@ class TestPortfolio():
         self.correlation_threshold = 1              # 1 for simplicity, allowing correlated trades
         self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
 
-        self.max_risk_per_trade_percentage = 1      # max loss per trade, for when not using kelly fraction.
+        self.max_risk_per_trade_percentage = 1      # max loss per trade, when not using kelly fraction.
 
         self.start_date = datetime.now() - relativedelta(years=5)
 
         # This implementation is limited to supporting one timeframe.
         self.timeframes = ["1d"]
 
-        self.strategies = [EMACross50200]
+        self.strategies = {
+            "EMACross50200": EMACross50200
+        }
 
         self.assets = {
             "EQUITIES": ["GOOGL", "AMZN", "TSLA", "F"],
@@ -49,7 +51,7 @@ class TestPortfolio():
         self.allocations = {
             "EQUITIES": {
                 "allocation": 20,
-                "in_use": 0,
+                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -59,7 +61,7 @@ class TestPortfolio():
             },
             "CURRENCIES": {
                 "allocation": 20,
-                "in_use": 0,
+                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -69,7 +71,7 @@ class TestPortfolio():
             },
             "COMMODITIES": {
                 "allocation": 20,
-                "in_use": 0,
+                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -77,9 +79,9 @@ class TestPortfolio():
                     }
                 }
             },
-            "INDICIES": {
+            "INDICES": {
                 "allocation": 20,
-                "in_use": 0,
+                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -89,7 +91,7 @@ class TestPortfolio():
             },
             "CRYPTO": {
                 "allocation": 20,
-                "in_use": 0,
+                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -100,11 +102,11 @@ class TestPortfolio():
         }
 
         # Validate settings.
-        if sum([i["allocation"] for i in self.allocations.values()["allocation"]]) != 100:
+        if sum([i["allocation"] for i in self.allocations.values()]) != 100:
             raise ValueError("Asset class allocation must total 100.")
 
         for asset_class in self.allocations.values():
-            if sum([i for i in asset_class["strategy_allocations"].values()['allocation']]) != 100:
+            if sum([i['allocation'] for i in asset_class["strategy_allocations"].values()]) != 100:
                 raise ValueError("Strategy allocation per asset class must total 100.")
 
         if self.correlation_threshold < -1 or self.correlation_threshold > 1:
@@ -112,10 +114,33 @@ class TestPortfolio():
 
     def calculate_position_size(self, signal: dict) -> int:
         """
-        If p_win is set for the strategy, return a kelly fraction.
+        If p_win is set for the strategy, use a kelly fraction.
         Otherwise use self.max_risk_per_trade_percentage to find the size.
+
+        Fixed risk works such that the distance between stop and entry is used to calculate
+        a position size that would lose no more than the pre-defined loss amount, in this case
+        a percentage of the allocation for that asset class/strategy.
         """
-        return 346
+
+        alloc_remaining_ac = 100 - self.allocations[signal["asset_class"]]["in_use"]
+        alloc_remaining_s = 100 - self.allocations[signal["asset_class"]]["strategy_allocations"][signal["strategy"]]["in_use"]
+
+        deployable_capital = (self.current_balance * alloc_remaining_ac / 100) * alloc_remaining_s / 100
+
+        try:
+            # Kelly.
+            p_win = self.strategies[signal['strategy']].p_win[signal['symbol']][signal['timeframe']]
+            p_lose = 1 - p_win
+            f_lost = None  # TODO
+            f_won = None  # TODO
+            size = (p_win / f_lost) - (p_lose / f_won)
+
+        except KeyError:
+            # Fixed.
+            risked_amt = (deployable_capital / 1000) * self.max_risk_per_trade_percentage
+            size = abs(risked_amt // ((signal['stop'] - signal['entry']) / signal['entry']))
+
+        return size
 
     def update_price(self, bar: pd.Series) -> dict:
         """
