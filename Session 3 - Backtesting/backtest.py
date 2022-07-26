@@ -1,5 +1,6 @@
 from os import listdir
 import pandas as pd
+import json
 
 # pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
@@ -142,7 +143,7 @@ class Backtester:
             root: nested dict of dataframes as formatted by load_local_data().
                 e.g data[asset_class][symbol][timeframe]
             timeframes: list of timeframes used by target portfolio.
-            timeframes: list of symbols used by target portfolio.
+            symbols: list of symbols used by target portfolio.
 
         Returns:
             c_matrix: dict of correlation matrices for each timeframe
@@ -184,58 +185,97 @@ class Backtester:
 
         # Check if a position for the symbol already exists.
         try:
-            existing_position = self.portfolio.positions[signal['symbol']]
-        except KeyError:
-            existing_position = None
-
-        # If yes: if opposing direction, close trade. If not, do nothing.
-        # Consider adding compounding behaviour here for risk-free positions.
-        if existing_position:
+            # If yes: if opposing direction, close trade. If not, do nothing.
+            existing_position = self.portfolio.positions[signal['symbol']][signal['strategy']]
             if existing_position['direction'] != signal['direction']:
                 self.close_position(signal)
+            else:
+                # Adding compounding behaviour here if required in future.
+                pass
 
-        # If no: open a position if trade would be within allocation and risk limits.
-        else:
+        except KeyError:
+            # If no: open a position if trade would be within allocation and risk limits.
             if self.within_limits(signal):
                 self.open_position(signal)
+            else:
+                # Add logging for non-actionable signals here if required in future.
+                pass
 
-    def within_limits(self, signal: dict) -> None:
+    def within_limits(self, signal: dict) -> bool:
+        """
+        Return True if signal would be allowable according to portfolio rules.
+        """
+        result = True
+
+        return result
+
+    def open_position(self, signal: dict) -> None:
+        """
+        This method assumes we have already checked that a position exists or not, so naively assigns
+        a new positon directly to portfolio.positions['symbol']['strategy'], updates portfolio metrics,
+        and adds a record to transaction history. Portfolio balance is not altered until position is closed.
+        """
+
+        position = {
+            'entry': signal['entry'],
+            'stop': signal['stop'],
+            'targets': signal['targets'],
+            'size': self.portfolio.calculate_position_size(signal),
+            'direction': signal['direction'],
+            'open': True
+        }
+
+        # Update position and transaction records.
+        try:
+            self.portfolio.positions[signal['symbol']][signal['strategy']] = position
+        except KeyError:
+            self.portfolio.positions[signal['symbol']] = {}
+            self.portfolio.positions[signal['symbol']][signal['strategy']] = position
+
+        self.portfolio.position_count += 1
+
+        self.portfolio.transaction_history[signal['symbol']].append({
+            'qty': position['size'],
+            'direction': signal['direction'],
+            'strategy': signal['strategy'],
+        })
+
+        # Update allocation records.
+        asset_class, strategy = signal['asset_class'], signal['strategy']
+        allocation = self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
+        self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['in use'] = allocation
+
+    def close_position(self, signal: dict) -> None:
         pass
 
-    def open_position(self, signal) -> None:
-        pass
-
-    def close_position(self, signal) -> None:
+    def modify_position(self, signal: dict) -> None:
         pass
 
     def start(self, start_timestamp=None, finish_timestamp=None):
         """
-        IMPORTANT: all dataframes must be synchronised on date index, i.e have a continuous date index,
-        no missing timestamps, start and finish on same timestamps.
+        IMPORTANT: For this to work all dataframes must be synchronised by date, i.e have a
+        continuous date index, no missing timestamps, start and finish on same timestamps.
 
         Limitations:
             - Simulation supports only a single timeframe across all strategies (multiple strategies supported).
             - Features requiring analysis of > 1 unit periods must have outputs condensed into a single unit.
                 see EmaCross50200 for example using Cross column.
             - Detection of resting order triggers not implemented, reliant on discrete BUY/SELL signals.
+                by extension, trades cannot be risk-free until they are fully closed, so compounding not supported.
             - Partial closures/take profit orders not supported.
+            - Trades measured and executed in $ value, lot sizes are not supported.
         """
 
-        # Data pre-processing.
-        self.apply_features_all_datasets(self.data, self.portfolio.strategies, self.portfolio.assets_flattened)
+        # Do pre-processing.
+        self.apply_features_all_datasets(self.data, self.portfolio.strategies.values(), self.portfolio.assets_flattened)
         self.c_matrix = self.correlation_matrix(self.data, self.portfolio.timeframes, self.portfolio.assets_flattened)
 
-        # print(self.c_matrix["1d"])
-        # print(self.c_matrix["1d"]['GOOGL']['AMZN'])
-        # print(self.c_matrix["1d"]['F']['TSLA'])
-
-        # Use first asset's data for start/finish indexing.
+        # Use first asset's dataset for start/finish indexing.
         asset_class = list(self.portfolio.assets.keys())[0]
         symbol = self.portfolio.assets[asset_class][0]
-        timeframe = self.portfolio.strategies[0].timeframe
+        timeframe = list(self.portfolio.strategies.values())[0].timeframe
         df = self.data[asset_class][symbol][timeframe]
         rows = df.shape[0]
-
         start_index = df.iloc[start_timestamp].name if start_timestamp is not None else 0
         finish_index = df.iloc[start_timestamp].name if finish_timestamp is not None else rows
 
@@ -247,9 +287,9 @@ class Backtester:
             for asset_class in self.portfolio.assets:
                 for symbol in self.portfolio.assets[asset_class]:
 
-                    # Positions can be opened and closed two ways depending on the strategy:
+                    # Positions can be opened/closed/modified two ways:
                     # 1. Directly with a buy/sell signal, as derived from feature data during pre-processing
-                    for strategy in self.portfolio.strategies:
+                    for strategy in self.portfolio.strategies.values():
                         signal = strategy.check_for_signal(
                             self.data[asset_class][symbol][strategy.timeframe].iloc[index])
                         if signal:
@@ -259,8 +299,15 @@ class Backtester:
                             signal['strategy'] = strategy.name
                             self.process_signal(signal)
 
-                    # 2. If price crosses a resting limit order.
-                    # (Not implemented for this example)
-                    signals = self.portfolio.update_price()
-                    if signals:
-                        map(self.process_signal, signals)
+                    # 2. If price movement triggers a resting order.
+                    signal = self.portfolio.update_price(
+                        self.data[asset_class][symbol][strategy.timeframe].iloc[index])
+                    if signal:
+                        signal['asset_class'] = asset_class
+                        signal['symbol'] = symbol
+                        signal['timeframe'] = strategy.timeframe
+                        signal['strategy'] = strategy.name
+                        self.process_signal(signal)
+
+        print("positions", json.dumps(self.portfolio.positions, indent=2))
+        # print(json.dumps("tx history", self.portfolio.transaction_history, indent=2))
