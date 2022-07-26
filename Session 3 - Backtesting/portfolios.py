@@ -114,7 +114,7 @@ class TestPortfolio():
 
     def calculate_position_size(self, signal: dict) -> int:
         """
-        If p_win is set for the strategy, use a kelly fraction.
+        If p_win and avg_r are set for the strategy, use kelly fraction.
         Otherwise use self.max_risk_per_trade_percentage to find the size.
 
         Fixed risk works such that the distance between stop and entry is used to calculate
@@ -128,15 +128,18 @@ class TestPortfolio():
         deployable_capital = (self.current_balance * alloc_remaining_ac / 100) * alloc_remaining_s / 100
 
         try:
-            # Kelly.
+            # Kelly fraction.
+            avg_r = self.strategies[signal['strategy']].avg_r[signal['symbol']][signal['timeframe']]
+            r_adjusted_target = signal['entry'] * avg_r if signal['direction'] == "BUY" else signal['entry'] * -avg_r
+
             p_win = self.strategies[signal['strategy']].p_win[signal['symbol']][signal['timeframe']]
             p_lose = 1 - p_win
-            f_lost = None  # TODO
-            f_won = None  # TODO
+            f_lost = abs((signal['stop'] - signal['entry']) / signal['entry'])  # % change from entry to stop.
+            f_won = abs((r_adjusted_target - signal['entry']) / signal['entry'])  # % change from entry to R adjusted target.
             size = (p_win / f_lost) - (p_lose / f_won)
 
         except KeyError:
-            # Fixed.
+            # Fixed risk.
             risked_amt = (deployable_capital / 1000) * self.max_risk_per_trade_percentage
             size = abs(risked_amt // ((signal['stop'] - signal['entry']) / signal['entry']))
 

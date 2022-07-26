@@ -5,7 +5,9 @@ class EMACross50200:
 
     name = "EMACross50200"
     timeframe = "1d"
-    p_win = {}  # p_win[symbol][timeframe] ..
+
+    p_win = {}    # p_win[symbol][timeframe] ..
+    avg_r = {}    # avg_r[symbol][timeframe] ..
 
     def feature_data(data: pd.DataFrame, slow=200, fast=50) -> [pd.Series]:
         """
