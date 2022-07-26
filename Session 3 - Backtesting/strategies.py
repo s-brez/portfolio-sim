@@ -9,14 +9,15 @@ class EMACross50200:
 
     def feature_data(data: pd.DataFrame, slow=200, fast=50) -> [pd.Series]:
         """
-        Use a third "cross" column if-or-not a cross occurred on that row.
+        Use a third "cross" column for if-or-not a cross occurred on that row.
         """
         slow_ema = data['Close'].ewm(span=slow, adjust=False).mean().rename('EMA200')
         fast_ema = data['Close'].ewm(span=fast, adjust=False).mean().rename('EMA50')
         cross = pd.Series(None, index=data.index).rename("Cross")
 
         # Populate cross column.
-        # Not the fastest way, use a vectorised method if dataframe sizes get much larger.
+        # If using timeframes more granular than 1d you'll want to optimise this to cut processing time.
+        # (or if using more than 1-2k bars per dataset)
         temp_df = pd.concat([fast_ema, slow_ema], axis=1)
         for index in range(0, temp_df.shape[0]):
             if index > 0:
@@ -38,12 +39,23 @@ class EMACross50200:
     def check_for_signal(data: pd.Series) -> dict:
         """
         Return a signal if one presents, or None.
+
+        Stop: 150% of bar range.
+        Take profit: not set, uses separate exit signal.
         """
         signal = None
 
         if data['Cross'] == "BUY" or data['Cross'] == "SELL":
+
+            stop_dist = abs(data['High'] - data['Low']) * 1.5
+            stop = data['Close'] - stop_dist if data['Cross'] == "BUY" else data['Close'] + stop_dist
+
             signal = {
-                'direction': data['Cross']
+                'timestamp': data.name,  # .name is the index in a Series
+                'direction': data['Cross'],
+                'entry': data['Close'],
+                'stop': stop,
+                'targets': []   # No defined targets for this strategy, uses an exit signal.
             }
 
         return signal
