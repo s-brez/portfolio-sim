@@ -11,19 +11,17 @@ class TestPortfolio():
     def __init__(self):
         self.name = "Test Portfolio"
         self.currency = "USD"
-        self.start_balance = 1000000
-        self.current_balance = 1000000
+        self.start_equity = 1000000
+        self.current_equity = 1000000
 
         self.positions = {}                         # positions[symbol][strategy] ..
         self.position_count = 0
 
         self.simulated_fee_flat = 2                 # dollar value added to each trade cost
         self.simulated_fee_percentage = 0.025       # percentage of trade size added to each trade cost
-
         self.max_simultaneous_positions = 10
         self.correlation_threshold = 1              # 1 for simplicity, allowing correlated trades
         self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
-
         self.max_risk_per_trade_percentage = 1      # max loss per trade, when not using kelly fraction.
 
         self.start_date = datetime.now() - relativedelta(years=5)
@@ -125,7 +123,7 @@ class TestPortfolio():
         alloc_remaining_ac = 100 - self.allocations[signal["asset_class"]]["in_use"]
         alloc_remaining_s = 100 - self.allocations[signal["asset_class"]]["strategy_allocations"][signal["strategy"]]["in_use"]
 
-        deployable_capital = (self.current_balance * alloc_remaining_ac / 100) * alloc_remaining_s / 100
+        deployable_capital = (self.current_equity * alloc_remaining_ac / 100) * alloc_remaining_s / 100
 
         try:
             # Kelly fraction.
@@ -158,10 +156,19 @@ class TestPortfolio():
         """
         return None
 
+    def metrics(self) -> dict:
+        """
+        TODO:   Net profit, gross profit, gross loss, fees total, max DD, total trades, avg hold time,
+                avg hold time win, avg hold time loss, sharpe & sortino portfolio and individual,
+                win:loss, long:short, RR portfolio and individual, avg RR winner, avg RR loser, EXP,
+                avg size, total winners, total losers, percent profitable, largest winner, largest loser
+        """
+        pass
+
     def summary(self) -> str:
         return (
             f"\n** {self.name} **"
-            f"\nOpening balance: {self.start_balance} {self.currency}"
+            f"\nOpening balance: {self.start_equity} {self.currency}"
             f"\nStart date: {self.start_date}"
             f"\nTimeframes in use: {self.timeframes}"
             f"\nStrategies in use: {self.strategies}"
