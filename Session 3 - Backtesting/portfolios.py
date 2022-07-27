@@ -11,6 +11,7 @@ class TestPortfolio():
     def __init__(self):
         self.name = "Test Portfolio"
         self.currency = "USD"
+        self.start_date = datetime.now() - relativedelta(years=5)
         self.start_equity = 1000000
         self.current_equity = 1000000
         self.trade_history = []                    # [{tx pnl data}, ..]
@@ -27,7 +28,7 @@ class TestPortfolio():
         self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
         self.drawdown_watermark_percentage = 0
 
-        self.start_date = datetime.now() - relativedelta(years=5)
+        self.close_positions_at_finish = False      # Terminate all open positions at portfolio end date.
 
         # This implementation is limited to supporting one timeframe.
         self.timeframes = ["1d"]
@@ -52,7 +53,6 @@ class TestPortfolio():
         self.allocations = {
             "EQUITIES": {
                 "allocation": 20,
-                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -62,7 +62,6 @@ class TestPortfolio():
             },
             "CURRENCIES": {
                 "allocation": 20,
-                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -72,7 +71,6 @@ class TestPortfolio():
             },
             "COMMODITIES": {
                 "allocation": 20,
-                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -82,7 +80,6 @@ class TestPortfolio():
             },
             "INDICES": {
                 "allocation": 20,
-                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -92,7 +89,6 @@ class TestPortfolio():
             },
             "CRYPTO": {
                 "allocation": 20,
-                "in_use": 0,  # 0-100
                 "strategy_allocations": {
                     EMACross50200.name: {
                         "allocation": 100,
@@ -129,10 +125,10 @@ class TestPortfolio():
         a percentage of the allocation for that asset class/strategy.
         """
 
-        alloc_remaining_ac = 100 - self.allocations[signal["asset_class"]]["in_use"]
+        alloc_ac = 100 - self.allocations[signal["asset_class"]]["allocation"]
         alloc_remaining_s = 100 - self.allocations[signal["asset_class"]]["strategy_allocations"][signal["strategy"]]["in_use"]
 
-        deployable_capital = (self.current_equity * alloc_remaining_ac / 100) * alloc_remaining_s / 100
+        deployable_capital = (self.current_equity * alloc_ac / 100) * alloc_remaining_s / 100
 
         try:
             # Kelly fraction.
@@ -151,25 +147,155 @@ class TestPortfolio():
 
         return size
 
-    def update_price(self, bar: pd.Series) -> dict:
+    def within_limits(self, signal: dict) -> bool:
+        """
+        Return True if signal would be allowable according to portfolio rules.
+        """
+        should_trade = False
+
+        alloc_remaining_strategy = 100 - self.allocations[signal["asset_class"]]["strategy_allocations"][signal["strategy"]]["in_use"]
+
+        if alloc_remaining_strategy > 0:
+            should_trade = True
+
+        if self.position_count + 1 >= self.max_simultaneous_positions:
+            should_trade = False
+
+        if self.drawdown_watermark_percentage >= self.drawdown_limit_percentage:
+            should_trade = False
+            self.active = False
+
+        # TODO: correlation threshold check
+
+        return should_trade
+
+    def open_position(self, signal: dict) -> None:
+        """
+        This method assumes we have already checked that a position exists or not, so naively assigns
+        a new positon directly to portfolio.positions['symbol']['strategy'], updates portfolio metrics,
+        and adds a record to transaction history. Portfolio balance is not altered until position is closed.
+        """
+
+        # Dont action signals where entry and stop are the same. Very low volatility assets may produce
+        # undesirable signals for certain strategies.
+        if signal['entry'] != signal['stop']:
+
+            size = self.calculate_position_size(signal)
+            entry_fees = self.calculate_fees(size)
+
+            position = {
+                'entry': signal['entry'],
+                'stop': signal['stop'],
+                'targets': signal['targets'],
+                'size': size,
+                'fees': entry_fees,
+                'direction': signal['direction'],
+                'strategy': signal['strategy'],
+                'timeframe': signal['timeframe']
+            }
+
+            # Update position and transaction records.
+            try:
+                self.positions[signal['symbol']][signal['strategy']] = position
+            except KeyError:
+                self.positions[signal['symbol']] = {}
+                self.positions[signal['symbol']][signal['strategy']] = position
+
+            self.position_count += 1
+
+            self.transaction_history[signal['symbol']][signal['strategy']].append({
+                'qty': position['size'],
+                'price': signal['entry'],
+                'direction': signal['direction'],
+                'fees': entry_fees,
+                'timestamp': str(signal['timestamp'])
+            })
+
+            # Update allocation records.
+            asset_class, strategy = signal['asset_class'], signal['strategy']
+            strategy_allocation = self.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
+            self.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] = strategy_allocation
+
+    def close_position(self, signal: dict) -> None:
+
+        # Update transaction records.
+        self.transaction_history[signal['symbol']][signal['strategy']].append({
+            'qty': self.positions[signal['symbol']][signal['strategy']]['size'],
+            'price': signal['entry'],
+            'direction': signal['direction'],
+            'fees': self.calculate_fees(self.positions[signal['symbol']][signal['strategy']]['size']),
+            'timestamp': str(signal['timestamp'])
+        })
+
+        # Update allocation records.
+        asset_class, strategy = signal['asset_class'], signal['strategy']
+        allocation = self.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
+        self.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] -= allocation
+
+        # Update portfolio stats.
+        self.calculate_pnl(signal)
+
+        # Remove position from portfolio.
+        self.positions[signal['symbol']][signal['strategy']] = None
+        self.position_count -= 1
+        self.total_trades += 1
+
+    def modify_position(self, signal: dict) -> None:
+        self.close_position(signal)
+
+    def update_price(self, bar: pd.Series, strategy: str) -> dict:
         """
         If a resting limit or stop limit entry order is triggered, return a signal.
         If a stop loss order is triggered, dont return a a signal, just close the position.
         if a partial take-profit order is triggered, dont return a signal, just modify position.
         if a final take-profit order is triggered, dont return a signal, just clost the position.
 
-        This implementation is limited to checking only for stops, as our example
+        Note this implementation is limited to checking only for stops, as our example
         strategies rely on separate exit signals for take-profit/exit. Realistically you'd
         need to check against every order scenario in use by your basket of strategies.
         """
-        return None
+
+        signal = None
+
+        try:
+            position = self.positions[bar['ticker']][strategy]
+
+            # Check if stops were triggered.
+            if position:
+                stop_exit_signal = {
+                    'timestamp': bar.name,
+                    "symbol": position['symbol'],
+                    "entry": position['stop'],
+                    "stop": None,
+                    "targets": None,
+                    "timeframe": "1d",
+                    'asset_class': position['asset_class'],
+                    'symbol': position['symbol'],
+                    'timeframe': position['timeframe'],
+                    'strategy': strategy,
+                }
+
+                if position['direction'] == "BUY":
+                    if bar['Low'] <= position['stop']:
+                        stop_exit_signal['direction'] = "SELL"
+                        self.close_position(stop_exit_signal)
+                else:
+                    if bar['High'] >= position['stop']:
+                        stop_exit_signal['direction'] = "BUY"
+                        self.close_position(stop_exit_signal)
+
+            # Check other resting order scenarios here in future.
+
+        except KeyError:
+            # No position exists, do nothing.
+            pass
+
+        return signal
 
     def calculate_pnl(self, signal: dict, stop=None) -> None:
         """
         Update equity with pnl for closed trade corresponding to parameter signal.
         """
-
-        print(signal)
 
         position = self.positions[signal['symbol']][signal['strategy']]
         entry = position['entry']
@@ -212,10 +338,11 @@ class TestPortfolio():
     def summary(self) -> str:
         return (
             f"\n** {self.name} **"
-            f"\nOpening balance: {self.start_equity} {self.currency}"
+            f"\nOpening equity: {self.start_equity} {self.currency}"
+            f"\nCurrent equity: {round(self.current_equity, 2)} {self.currency}"
             f"\nStart date: {self.start_date}"
             f"\nTimeframes in use: {self.timeframes}"
-            f"\nStrategies in use: {self.strategies}"
+            f"\nStrategies in use: {self.strategies.keys()}"
             f"\nMax open positions allowed: {self.max_simultaneous_positions}"
             f"\nMax allowable correlation between positions: {self.correlation_threshold}"
             f"\nSimulated flat transaction fee: {self.simulated_fee_flat}"

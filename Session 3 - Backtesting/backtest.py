@@ -192,7 +192,7 @@ class Backtester:
             existing_position = self.portfolio.positions[signal['symbol']][signal['strategy']]
             if existing_position:
                 if existing_position['direction'] != signal['direction']:
-                    self.modify_position(signal)
+                    self.portfolio.modify_position(signal)
                 else:
                     # Adding compounding behaviour here if required in future.
                     pass
@@ -203,121 +203,28 @@ class Backtester:
 
         # If no: open a position if trade would be within allocation and risk limits.
         if should_open_new_position:
-            if self.within_limits(signal):
-                self.open_position(signal)
+            if self.portfolio.within_limits(signal):
+                self.portfolio.open_position(signal)
             else:
                 # Add logging for non-actionable signals here if required in future.
                 pass
-
-    def within_limits(self, signal: dict) -> bool:
-        """
-        Return True if signal would be allowable according to portfolio rules.
-        """
-        should_trade = False
-
-        alloc_remaining_asset_class = 100 - self.portfolio.allocations[signal["asset_class"]]["in_use"]
-        alloc_remaining_strategy = 100 - self.portfolio.allocations[signal["asset_class"]]["strategy_allocations"][signal["strategy"]]["in_use"]
-
-        if alloc_remaining_asset_class > 0 and alloc_remaining_strategy > 0:
-            should_trade = True
-
-        if self.portfolio.position_count + 1 >= self.portfolio.max_simultaneous_positions:
-            should_trade = False
-
-        if self.portfolio.drawdown_watermark_percentage >= self.portfolio.drawdown_limit_percentage:
-            should_trade = False
-            self.active = False
-
-        # TODO: correlation threshold check
-
-        return should_trade
-
-    def open_position(self, signal: dict) -> None:
-        """
-        This method assumes we have already checked that a position exists or not, so naively assigns
-        a new positon directly to portfolio.positions['symbol']['strategy'], updates portfolio metrics,
-        and adds a record to transaction history. Portfolio balance is not altered until position is closed.
-        """
-
-        # Dont action signals where entry and stop are the same. Very low volatility assets may produce
-        # undesirable signals for certain strategies.
-        if signal['entry'] != signal['stop']:
-
-            size = self.portfolio.calculate_position_size(signal)
-            entry_fees = self.portfolio.calculate_fees(size)
-
-            position = {
-                'entry': signal['entry'],
-                'stop': signal['stop'],
-                'targets': signal['targets'],
-                'size': size,
-                'fees': entry_fees,
-                'direction': signal['direction'],
-            }
-
-            # Update position and transaction records.
-            try:
-                self.portfolio.positions[signal['symbol']][signal['strategy']] = position
-            except KeyError:
-                self.portfolio.positions[signal['symbol']] = {}
-                self.portfolio.positions[signal['symbol']][signal['strategy']] = position
-
-            self.portfolio.position_count += 1
-
-            self.portfolio.transaction_history[signal['symbol']][signal['strategy']].append({
-                'qty': position['size'],
-                'price': signal['entry'],
-                'direction': signal['direction'],
-                'fees': entry_fees,
-                'timestamp': str(signal['timestamp'])
-            })
-
-            # Update allocation records.
-            asset_class, strategy = signal['asset_class'], signal['strategy']
-            allocation = self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
-            self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] = allocation
-
-    def close_position(self, signal: dict) -> None:
-
-        # Update transaction records.
-        self.portfolio.transaction_history[signal['symbol']][signal['strategy']].append({
-            'qty': self.portfolio.positions[signal['symbol']][signal['strategy']]['size'],
-            'price': signal['entry'],
-            'direction': signal['direction'],
-            'fees': self.portfolio.calculate_fees(self.portfolio.positions[signal['symbol']][signal['strategy']]['size']),
-            'timestamp': str(signal['timestamp'])
-        })
-
-        # Update allocation records.
-        asset_class, strategy = signal['asset_class'], signal['strategy']
-        allocation = self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
-        self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] -= allocation
-
-        # Update portfolio stats.
-        self.portfolio.calculate_pnl(signal)
-
-        # Remove position from portfolio.
-        self.portfolio.positions[signal['symbol']][signal['strategy']] = None
-        self.portfolio.position_count -= 1
-        self.portfolio.total_trades += 1
-
-    def modify_position(self, signal: dict) -> None:
-        self.close_position(signal)
 
     def start(self, start_timestamp=None, finish_timestamp=None):
         """
         IMPORTANT: For this to work all dataframes must be synchronised by date, i.e have a
         continuous date index, no missing timestamps, start and finish on same timestamps.
 
-        Limitations:
+        Limitations/assumptions:
             - Simulation supports only a single timeframe across all strategies (multiple strategies supported).
             - Features requiring analysis of > 1 unit periods must have outputs condensed into a single unit.
                 see EmaCross50200 for example using Cross column.
-            - Detection of resting order triggers not implemented, reliant on discrete BUY/SELL signals.
-                by extension, trades cannot be risk-free until they are fully closed, so compounding not supported.
+            - Detection of resting order triggers not implemented (only stop loss orders), so the system is reliant
+              on discrete BUY/SELL signals. by nature of this, trades cannot be risk-free until they are fully closed,
+              so compounding already open positions of the same symbol is not supported.
             - Partial closures/take profit orders not supported.
             - Trades measured and executed in $ units, lot sizing  not supported.
             - Open pnl not tracked, only realised pnl.
+            - Assumes stops are filled at their trigger price.
         """
 
         # Do pre-processing.
@@ -352,11 +259,16 @@ class Backtester:
                                 signal['symbol'] = symbol
                                 signal['timeframe'] = strategy.timeframe
                                 signal['strategy'] = strategy.name
+
+                                # debug_signal = signal
+                                # debug_signal['timestamp'] = str(debug_signal['timestamp'])
+                                # print(json.dumps(debug_signal))
+
                                 self.process_signal(signal)
 
                         # 2. If price movement triggers a resting order.
                         signal = self.portfolio.update_price(
-                            self.data[asset_class][symbol][strategy.timeframe].iloc[index])
+                            self.data[asset_class][symbol][strategy.timeframe].iloc[index], strategy.name)
                         if signal:
                             signal['asset_class'] = asset_class
                             signal['symbol'] = symbol
@@ -364,7 +276,15 @@ class Backtester:
                             signal['strategy'] = strategy.name
                             self.process_signal(signal)
 
+                        if self.portfolio.close_positions_at_finish:
+                            # TODO.
+                            pass
+
             # Close all active positions in early termination case using current bar close price
             else:
                 # TODO
                 pass
+
+        # TODO: implement position flip on exit signal.
+
+        print(self.portfolio.summary())
