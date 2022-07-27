@@ -26,6 +26,7 @@ class Backtester:
         self.data = self.load_local_data(SYMBOLS)
         self.portfolio = portfolio
         self.c_matrix = None
+        self.active = True
 
     def load_local_data(self, symbols: list) -> dict:
         """
@@ -183,18 +184,25 @@ class Backtester:
 
     def process_signal(self, signal: dict):
 
+        should_open_new_position = False
+
         # Check if a position for the symbol already exists.
         try:
-            # If yes: if opposing direction, close trade. If not, do nothing.
+            # If yes: close trade if signal is opposite direction to position. If same direction, do nothing.
             existing_position = self.portfolio.positions[signal['symbol']][signal['strategy']]
-            if existing_position['direction'] != signal['direction']:
-                self.close_position(signal)
+            if existing_position:
+                if existing_position['direction'] != signal['direction']:
+                    self.modify_position(signal)
+                else:
+                    # Adding compounding behaviour here if required in future.
+                    pass
             else:
-                # Adding compounding behaviour here if required in future.
-                pass
-
+                should_open_new_position = True
         except KeyError:
-            # If no: open a position if trade would be within allocation and risk limits.
+            should_open_new_position = True
+
+        # If no: open a position if trade would be within allocation and risk limits.
+        if should_open_new_position:
             if self.within_limits(signal):
                 self.open_position(signal)
             else:
@@ -205,9 +213,21 @@ class Backtester:
         """
         Return True if signal would be allowable according to portfolio rules.
         """
-        result = True
+        should_trade = False
 
-        return result
+        alloc_remaining_asset_class = 100 - self.portfolio.allocations[signal["asset_class"]]["in_use"]
+        alloc_remaining_strategy = 100 - self.portfolio.allocations[signal["asset_class"]]["strategy_allocations"][signal["strategy"]]["in_use"]
+
+        if alloc_remaining_asset_class > 0 and alloc_remaining_strategy > 0:
+            should_trade = True
+
+        if self.portfolio.position_count + 1 >= self.portfolio.max_simultaneous_positions:
+            should_trade = False
+
+        if self.portfolio.drawdown_watermark_percentage >= self.portfolio.drawdown_limit_percentage:
+            should_trade = False
+
+        return should_trade
 
     def open_position(self, signal: dict) -> None:
         """
@@ -216,40 +236,65 @@ class Backtester:
         and adds a record to transaction history. Portfolio balance is not altered until position is closed.
         """
 
-        position = {
-            'entry': signal['entry'],
-            'stop': signal['stop'],
-            'targets': signal['targets'],
-            'size': self.portfolio.calculate_position_size(signal),
-            'direction': signal['direction'],
-            'open': True
-        }
+        # Dont action signals where entry and stop are the same. Very low volatility assets may produce
+        # undesirable signals for certain strategies.
+        if signal['entry'] != signal['stop']:
 
-        # Update position and transaction records.
-        try:
-            self.portfolio.positions[signal['symbol']][signal['strategy']] = position
-        except KeyError:
-            self.portfolio.positions[signal['symbol']] = {}
-            self.portfolio.positions[signal['symbol']][signal['strategy']] = position
+            position = {
+                'entry': signal['entry'],
+                'stop': signal['stop'],
+                'targets': signal['targets'],
+                'size': self.portfolio.calculate_position_size(signal),
+                'direction': signal['direction'],
+            }
 
-        self.portfolio.position_count += 1
+            # Update position and transaction records.
+            try:
+                self.portfolio.positions[signal['symbol']][signal['strategy']] = position
+            except KeyError:
+                self.portfolio.positions[signal['symbol']] = {}
+                self.portfolio.positions[signal['symbol']][signal['strategy']] = position
 
-        self.portfolio.transaction_history[signal['symbol']].append({
-            'qty': position['size'],
-            'direction': signal['direction'],
-            'strategy': signal['strategy'],
-        })
+            self.portfolio.position_count += 1
 
-        # Update allocation records.
-        asset_class, strategy = signal['asset_class'], signal['strategy']
-        allocation = self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
-        self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['in use'] = allocation
+            self.portfolio.transaction_history[signal['symbol']][signal['strategy']].append({
+                'qty': position['size'],
+                'price': signal['entry'],
+                'direction': signal['direction'],
+                'fees': self.portfolio.calculate_fees(position['size'])
+            })
+
+            # Update allocation records.
+            asset_class, strategy = signal['asset_class'], signal['strategy']
+            allocation = self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
+            self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] = allocation
 
     def close_position(self, signal: dict) -> None:
+
+        # Update transaction records.
+        self.portfolio.transaction_history[signal['symbol']][signal['strategy']].append({
+            'qty': self.portfolio.positions[signal['symbol']][signal['strategy']]['size'],
+            'price': signal['entry'],
+            'direction': signal['direction'],
+            'fees': self.portfolio.calculate_fees(self.portfolio.positions[signal['symbol']][signal['strategy']]['size'])
+        })
+
+        # # Update allocation records.
+        asset_class, strategy = signal['asset_class'], signal['strategy']
+        allocation = self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
+        self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] -= allocation
+
+        # Calculate PnL and update portfolio.
+
+        # Remove position from portfolio.
+        self.portfolio.positions[signal['symbol']][signal['strategy']] = None
+        self.portfolio.position_count -= 1
+        self.portfolio.total_trades += 1
+
         pass
 
     def modify_position(self, signal: dict) -> None:
-        pass
+        self.close_position(signal)
 
     def start(self, start_timestamp=None, finish_timestamp=None):
         """
@@ -263,7 +308,8 @@ class Backtester:
             - Detection of resting order triggers not implemented, reliant on discrete BUY/SELL signals.
                 by extension, trades cannot be risk-free until they are fully closed, so compounding not supported.
             - Partial closures/take profit orders not supported.
-            - Trades measured and executed in $ value, lot sizes are not supported.
+            - Trades measured and executed in $ units, lot sizing  not supported.
+            - Open pnl not tracked, only realised pnl.
         """
 
         # Do pre-processing.
@@ -284,13 +330,24 @@ class Backtester:
 
         # Iterate dataframes timestamp by timestamp.
         for index in range(start_index, finish_index - 1):
-            for asset_class in self.portfolio.assets:
-                for symbol in self.portfolio.assets[asset_class]:
+            if self.active:
+                for asset_class in self.portfolio.assets:
+                    for symbol in self.portfolio.assets[asset_class]:
 
-                    # Positions can be opened/closed/modified two ways:
-                    # 1. Directly with a buy/sell signal, as derived from feature data during pre-processing
-                    for strategy in self.portfolio.strategies.values():
-                        signal = strategy.check_for_signal(
+                        # Positions can be opened/closed/modified two ways:
+                        # 1. Directly with a buy/sell signal, as derived from feature data during pre-processing
+                        for strategy in self.portfolio.strategies.values():
+                            signal = strategy.check_for_signal(
+                                self.data[asset_class][symbol][strategy.timeframe].iloc[index])
+                            if signal:
+                                signal['asset_class'] = asset_class
+                                signal['symbol'] = symbol
+                                signal['timeframe'] = strategy.timeframe
+                                signal['strategy'] = strategy.name
+                                self.process_signal(signal)
+
+                        # 2. If price movement triggers a resting order.
+                        signal = self.portfolio.update_price(
                             self.data[asset_class][symbol][strategy.timeframe].iloc[index])
                         if signal:
                             signal['asset_class'] = asset_class
@@ -299,15 +356,7 @@ class Backtester:
                             signal['strategy'] = strategy.name
                             self.process_signal(signal)
 
-                    # 2. If price movement triggers a resting order.
-                    signal = self.portfolio.update_price(
-                        self.data[asset_class][symbol][strategy.timeframe].iloc[index])
-                    if signal:
-                        signal['asset_class'] = asset_class
-                        signal['symbol'] = symbol
-                        signal['timeframe'] = strategy.timeframe
-                        signal['strategy'] = strategy.name
-                        self.process_signal(signal)
-
-        print("positions", json.dumps(self.portfolio.positions, indent=2))
-        # print(json.dumps("tx history", self.portfolio.transaction_history, indent=2))
+            # Use current bar close price to cut all active positions in early termination case.
+            else:
+                # TODO
+                pass
