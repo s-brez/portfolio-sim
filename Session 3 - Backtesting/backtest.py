@@ -226,6 +226,9 @@ class Backtester:
 
         if self.portfolio.drawdown_watermark_percentage >= self.portfolio.drawdown_limit_percentage:
             should_trade = False
+            self.active = False
+
+        # TODO: correlation threshold check
 
         return should_trade
 
@@ -240,11 +243,15 @@ class Backtester:
         # undesirable signals for certain strategies.
         if signal['entry'] != signal['stop']:
 
+            size = self.portfolio.calculate_position_size(signal)
+            entry_fees = self.portfolio.calculate_fees(size)
+
             position = {
                 'entry': signal['entry'],
                 'stop': signal['stop'],
                 'targets': signal['targets'],
-                'size': self.portfolio.calculate_position_size(signal),
+                'size': size,
+                'fees': entry_fees,
                 'direction': signal['direction'],
             }
 
@@ -261,7 +268,8 @@ class Backtester:
                 'qty': position['size'],
                 'price': signal['entry'],
                 'direction': signal['direction'],
-                'fees': self.portfolio.calculate_fees(position['size'])
+                'fees': entry_fees,
+                'timestamp': str(signal['timestamp'])
             })
 
             # Update allocation records.
@@ -276,22 +284,22 @@ class Backtester:
             'qty': self.portfolio.positions[signal['symbol']][signal['strategy']]['size'],
             'price': signal['entry'],
             'direction': signal['direction'],
-            'fees': self.portfolio.calculate_fees(self.portfolio.positions[signal['symbol']][signal['strategy']]['size'])
+            'fees': self.portfolio.calculate_fees(self.portfolio.positions[signal['symbol']][signal['strategy']]['size']),
+            'timestamp': str(signal['timestamp'])
         })
 
-        # # Update allocation records.
+        # Update allocation records.
         asset_class, strategy = signal['asset_class'], signal['strategy']
         allocation = self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
         self.portfolio.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] -= allocation
 
-        # Calculate PnL and update portfolio.
+        # Update portfolio stats.
+        self.portfolio.calculate_pnl(signal)
 
         # Remove position from portfolio.
         self.portfolio.positions[signal['symbol']][signal['strategy']] = None
         self.portfolio.position_count -= 1
         self.portfolio.total_trades += 1
-
-        pass
 
     def modify_position(self, signal: dict) -> None:
         self.close_position(signal)
@@ -356,7 +364,7 @@ class Backtester:
                             signal['strategy'] = strategy.name
                             self.process_signal(signal)
 
-            # Use current bar close price to cut all active positions in early termination case.
+            # Close all active positions in early termination case using current bar close price
             else:
                 # TODO
                 pass

@@ -13,6 +13,7 @@ class TestPortfolio():
         self.currency = "USD"
         self.start_equity = 1000000
         self.current_equity = 1000000
+        self.trade_history = []                    # [{tx pnl data}, ..]
 
         self.positions = {}                         # positions[symbol][strategy] ..
         self.position_count = 0
@@ -137,7 +138,6 @@ class TestPortfolio():
             # Kelly fraction.
             avg_r = self.strategies[signal['strategy']].avg_r[signal['symbol']][signal['timeframe']]
             r_adjusted_target = signal['entry'] * avg_r if signal['direction'] == "BUY" else signal['entry'] * -avg_r
-
             p_win = self.strategies[signal['strategy']].p_win[signal['symbol']][signal['timeframe']]
             p_lose = 1 - p_win
             f_lost = abs((signal['stop'] - signal['entry']) / signal['entry'])  # % change from entry to stop.
@@ -164,18 +164,48 @@ class TestPortfolio():
         """
         return None
 
-    def calculate_pnl(self, signal: dict) -> None:
+    def calculate_pnl(self, signal: dict, stop=None) -> None:
         """
-        Update pnl for the closed trade corresponding to the parameter signal.
+        Update equity with pnl for closed trade corresponding to parameter signal.
         """
-        pass
+
+        print(signal)
+
+        position = self.positions[signal['symbol']][signal['strategy']]
+        entry = position['entry']
+        exit = signal['entry'] if not stop else stop['price']
+        fees = position['fees'] * 2
+
+        delta = abs((entry - exit) / entry) * 100
+        pnl = abs((position['size'] / 100) * delta) - fees
+
+        if position['direction'] == "BUY":
+            net_pnl = pnl if exit > entry + fees else -pnl
+        else:
+            net_pnl = pnl if exit < entry - fees else pnl
+
+        self.current_equity += net_pnl
+
+        self.trade_history.append({
+            "net_pnl": net_pnl,
+            "side": position['direction'],
+            "size": position["size"],
+            "entry": entry,
+            "exit": exit,
+            "delta": delta,
+            "fees": fees,
+            "strategy": signal['strategy'],
+            "symbol": signal['symbol'],
+            "asset_class": signal['asset_class'],
+            "timestamp": str(signal['timestamp']),
+        })
 
     def calculate_metrics(self) -> dict:
         """
-        TODO:   Net profit, gross profit, gross loss, fees total, max DD, total trades, avg hold time,
-                avg hold time win, avg hold time loss, sharpe & sortino portfolio and individual,
-                win:loss, long:short, RR portfolio and individual, avg RR winner, avg RR loser, EXP,
-                avg size, total winners, total losers, percent profitable, largest winner, largest loser
+        Net profit, gross profit, gross loss, fees total, max DD, total trades, avg hold time,
+        avg hold time win, avg hold time loss, sharpe & sortino portfolio and individual,
+        win:loss, long:short, RR portfolio and individual, avg RR winner, avg RR loser, EXP,
+        avg size, total winners, total losers, percent profitable, largest winner, largest loser
         """
         pass
 
