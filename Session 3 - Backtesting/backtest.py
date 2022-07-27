@@ -239,8 +239,8 @@ class Backtester:
         rows = df.shape[0]
         start_index = df.iloc[start_timestamp].name if start_timestamp is not None else 0
         finish_index = df.iloc[start_timestamp].name if finish_timestamp is not None else rows
+        self.portfolio.finish_date = df.iloc[-1].name
 
-        # print(self.portfolio.summary())
         print(f"Running simulation for {self.portfolio.name}...")
 
         # Iterate dataframes timestamp by timestamp.

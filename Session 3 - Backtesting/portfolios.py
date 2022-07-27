@@ -12,9 +12,10 @@ class TestPortfolio():
         self.name = "Test Portfolio"
         self.currency = "USD"
         self.start_date = datetime.now() - relativedelta(years=5)
+        self.finish_date = None
         self.start_equity = 1000000
         self.current_equity = 1000000
-        self.trade_history = []                    # [{tx pnl data}, ..]
+        self.trade_history = []                     # [{tx pnl data}, ..]
 
         self.positions = {}                         # positions[symbol][strategy] ..
         self.position_count = 0
@@ -24,11 +25,11 @@ class TestPortfolio():
         self.simulated_fee_percentage = 0.025       # percentage of trade size added to each trade cost
         self.max_simultaneous_positions = 10
         self.correlation_threshold = 1              # 1 for simplicity, allowing correlated trades
-        self.max_risk_per_trade_percentage = 1      # max loss per trade, when not using kelly fraction.
         self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
         self.drawdown_watermark_percentage = 0
+        self.close_positions_at_finish = False
 
-        self.close_positions_at_finish = False      # Terminate all open positions at portfolio end date.
+        self.max_risk_per_trade_percentage = 2.5    # max loss per trade, when not using kelly fraction.
 
         # This implementation is limited to supporting one timeframe.
         self.timeframes = ["1d"]
@@ -128,7 +129,7 @@ class TestPortfolio():
         alloc_ac = 100 - self.allocations[signal["asset_class"]]["allocation"]
         alloc_remaining_s = 100 - self.allocations[signal["asset_class"]]["strategy_allocations"][signal["strategy"]]["in_use"]
 
-        deployable_capital = (self.current_equity * alloc_ac / 100) * alloc_remaining_s / 100
+        deployable_capital = (self.current_equity / (100 / alloc_ac)) / (100 / alloc_remaining_s)
 
         try:
             # Kelly fraction.
@@ -213,8 +214,8 @@ class TestPortfolio():
 
             # Update allocation records.
             asset_class, strategy = signal['asset_class'], signal['strategy']
-            strategy_allocation = self.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
-            self.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] = strategy_allocation
+            allocation = self.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
+            self.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] = allocation
 
     def close_position(self, signal: dict) -> None:
 
@@ -338,17 +339,20 @@ class TestPortfolio():
     def summary(self) -> str:
         return (
             f"\n** {self.name} **"
-            f"\nOpening equity: {self.start_equity} {self.currency}"
-            f"\nCurrent equity: {round(self.current_equity, 2)} {self.currency}"
+            f"\nOpening balance: {self.start_equity} {self.currency}"
+            f"\nCurrent balance: {round(self.current_equity, 2)} {self.currency}"
             f"\nStart date: {self.start_date}"
+            f"\nFinish date: {self.finish_date}"
+            f"\nDuration: {pd.Timedelta(self.finish_date - self.start_date)}"
             f"\nTimeframes in use: {self.timeframes}"
-            f"\nStrategies in use: {self.strategies.keys()}"
+            f"\nStrategies in use: {[s for s in self.strategies]}"
             f"\nMax open positions allowed: {self.max_simultaneous_positions}"
             f"\nMax allowable correlation between positions: {self.correlation_threshold}"
-            f"\nSimulated flat transaction fee: {self.simulated_fee_flat}"
-            f"\nSimulated percentage transaction fee: {self.simulated_fee_percentage}"
-            f"\nMax allowable drawdown before trading ceases: {self.drawdown_limit_percentage}"
-            f"\nMax exposure per trade when not using a kelly fraction: {self.max_risk_per_trade_percentage}"
-            f"\nTarget instruments: {json.dumps(self.assets, indent=2)}"
-            f"\nAllocations: {json.dumps(self.allocations, indent=2)}"
+            f"\nSimulated flat transaction fee: {self.simulated_fee_flat} {self.currency}"
+            f"\nSimulated percentage transaction fee: {self.simulated_fee_percentage}%"
+            f"\nMax allowable drawdown before trading ceases: {self.drawdown_limit_percentage}%"
+            f"\nMax exposure per trade when not using a kelly fraction: {self.max_risk_per_trade_percentage}%"
+            # f"\nTarget instruments: {json.dumps(self.assets, indent=2)}"
+            # f"\nAllocations: {json.dumps(self.allocations, indent=2)}"
+            # f"\nPositions: {json.dumps(self.positions, indent=2)}"
         )
