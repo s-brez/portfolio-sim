@@ -16,13 +16,15 @@ class TestPortfolio():
 
         self.positions = {}                         # positions[symbol][strategy] ..
         self.position_count = 0
+        self.total_trades = 0
 
         self.simulated_fee_flat = 2                 # dollar value added to each trade cost
         self.simulated_fee_percentage = 0.025       # percentage of trade size added to each trade cost
         self.max_simultaneous_positions = 10
         self.correlation_threshold = 1              # 1 for simplicity, allowing correlated trades
-        self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
         self.max_risk_per_trade_percentage = 1      # max loss per trade, when not using kelly fraction.
+        self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
+        self.drawdown_watermark_percentage = 0
 
         self.start_date = datetime.now() - relativedelta(years=5)
 
@@ -42,7 +44,7 @@ class TestPortfolio():
         }
 
         self.assets_flattened = [i for j in self.assets.values() for i in j]
-        self.transaction_history = {i: [] for i in self.assets_flattened}  # tx_history[symbol] ..
+        self.transaction_history = {a: {s: [] for s in self.strategies.keys()} for a in self.assets_flattened}   # tx_history[symbol][strategy] ..
 
         # Asset class allocations across all asset classes must total 100.
         # Likewise strategy allocations within each asset class must total 100.
@@ -110,6 +112,12 @@ class TestPortfolio():
         if self.correlation_threshold < -1 or self.correlation_threshold > 1:
             raise ValueError("Acceptable correlation value must be between -1 and 1.")
 
+    def calculate_fees(self, size: float) -> float:
+        """
+        Return simulated fee cost for the given position size.
+        """
+        return self.simulated_fee_flat + (self.simulated_fee_percentage / 100) * size
+
     def calculate_position_size(self, signal: dict) -> int:
         """
         If p_win and avg_r are set for the strategy, use kelly fraction.
@@ -156,7 +164,13 @@ class TestPortfolio():
         """
         return None
 
-    def metrics(self) -> dict:
+    def calculate_pnl(self, signal: dict) -> None:
+        """
+        Update pnl for the closed trade corresponding to the parameter signal.
+        """
+        pass
+
+    def calculate_metrics(self) -> dict:
         """
         TODO:   Net profit, gross profit, gross loss, fees total, max DD, total trades, avg hold time,
                 avg hold time win, avg hold time loss, sharpe & sortino portfolio and individual,
