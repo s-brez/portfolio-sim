@@ -259,10 +259,7 @@ class Backtester:
                                 signal['symbol'] = symbol
                                 signal['timeframe'] = strategy.timeframe
                                 signal['strategy'] = strategy.name
-
-                                # debug_signal = signal
-                                # debug_signal['timestamp'] = str(debug_signal['timestamp'])
-                                # print(json.dumps(debug_signal))
+                                signal['mode'] = "SIGNAL"
 
                                 self.process_signal(signal)
 
@@ -286,5 +283,3 @@ class Backtester:
                 pass
 
         # TODO: implement position flip on exit signal.
-
-        print(self.portfolio.summary())
