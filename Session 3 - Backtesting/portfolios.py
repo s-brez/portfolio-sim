@@ -1,7 +1,6 @@
 from dateutil.relativedelta import relativedelta
 from datetime import datetime
 import pandas as pd
-import json
 
 from strategies import EMACross50200
 
@@ -14,21 +13,23 @@ class TestPortfolio():
         self.start_date = datetime.now() - relativedelta(years=5)
         self.finish_date = None
         self.start_equity = 1000000
-        self.current_equity = 1000000
+        self.current_equity = self.start_equity
         self.trade_history = []                     # [{tx pnl data}, ..]
 
         self.positions = {}                         # positions[symbol][strategy] ..
         self.position_count = 0
         self.total_trades = 0
 
-        self.simulated_fee_flat = 2                 # dollar value added to each trade cost
-        self.simulated_fee_percentage = 0.025       # percentage of trade size added to each trade cost
+        self.simulated_fee_flat = 5                 # dollar value added to each transaction cost
+        self.simulated_fee_percentage = 0.025       # percentage of size added to each transaction cost
         self.max_simultaneous_positions = 10
         self.correlation_threshold = 1              # 1 for simplicity, allowing correlated trades
         self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
-        self.drawdown_watermark_percentage = 0
-        self.close_positions_at_finish = False
+        self.drawdown_watermark = self.current_equity
+        self.high_watermark = self.current_equity
 
+        self.close_positions_at_finish = False
+        self.use_kelly = True
         self.max_risk_per_trade_percentage = 2.5    # max loss per trade, when not using kelly fraction.
 
         # This implementation is limited to supporting one timeframe.
@@ -162,9 +163,10 @@ class TestPortfolio():
         if self.position_count + 1 >= self.max_simultaneous_positions:
             should_trade = False
 
-        if self.drawdown_watermark_percentage >= self.drawdown_limit_percentage:
-            should_trade = False
-            self.active = False
+        if self.drawdown_watermark != self.start_equity:
+            if ((self.drawdown_watermark - self.current_equity) / self.current_equity) * 1000 >= self.drawdown_limit_percentage:
+                should_trade = False
+                self.active = False
 
         # TODO: correlation threshold check
 
@@ -192,7 +194,8 @@ class TestPortfolio():
                 'fees': entry_fees,
                 'direction': signal['direction'],
                 'strategy': signal['strategy'],
-                'timeframe': signal['timeframe']
+                'timeframe': signal['timeframe'],
+                'timestamp': signal['timestamp']
             }
 
             # Update position and transaction records.
@@ -217,7 +220,10 @@ class TestPortfolio():
             allocation = self.allocations[asset_class]['strategy_allocations'][strategy]['allocation']
             self.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] = allocation
 
-    def close_position(self, signal: dict) -> None:
+    def close_position(self, signal: dict, mode=None) -> None:
+        """
+        Mode: "SIGNAL" or "STOP" or None
+        """
 
         # Update transaction records.
         self.transaction_history[signal['symbol']][signal['strategy']].append({
@@ -242,7 +248,7 @@ class TestPortfolio():
         self.total_trades += 1
 
     def modify_position(self, signal: dict) -> None:
-        self.close_position(signal)
+        self.close_position(signal, "SIGNAL")
 
     def update_price(self, bar: pd.Series, strategy: str) -> dict:
         """
@@ -274,16 +280,17 @@ class TestPortfolio():
                     'symbol': position['symbol'],
                     'timeframe': position['timeframe'],
                     'strategy': strategy,
+                    'mode': "STOP"
                 }
 
                 if position['direction'] == "BUY":
                     if bar['Low'] <= position['stop']:
                         stop_exit_signal['direction'] = "SELL"
-                        self.close_position(stop_exit_signal)
+                        self.close_position(stop_exit_signal, "STOP")
                 else:
                     if bar['High'] >= position['stop']:
                         stop_exit_signal['direction'] = "BUY"
-                        self.close_position(stop_exit_signal)
+                        self.close_position(stop_exit_signal, "STOP")
 
             # Check other resting order scenarios here in future.
 
@@ -307,40 +314,91 @@ class TestPortfolio():
         pnl = abs((position['size'] / 100) * delta) - fees
 
         if position['direction'] == "BUY":
-            net_pnl = pnl if exit > entry + fees else -pnl
+            net_pnl = pnl if exit > entry else -pnl
         else:
-            net_pnl = pnl if exit < entry - fees else pnl
+            net_pnl = pnl if exit < entry else -pnl
 
         self.current_equity += net_pnl
+
+        if self.current_equity < self.drawdown_watermark:
+            self.drawdown_watermark = self.current_equity
+
+        if self.current_equity > self.high_watermark:
+            self.high_watermark = self.current_equity
 
         self.trade_history.append({
             "net_pnl": net_pnl,
             "side": position['direction'],
-            "size": position["size"],
             "entry": entry,
             "exit": exit,
             "delta": delta,
+            "size": position["size"],
             "fees": fees,
             "strategy": signal['strategy'],
             "symbol": signal['symbol'],
+            "exit_mode": signal['mode'],
             "asset_class": signal['asset_class'],
-            "timestamp": str(signal['timestamp']),
+            "open_timestamp": str(position['timestamp']),
+            "close_timestamp": str(signal['timestamp']),
         })
 
-    def calculate_metrics(self) -> dict:
-        """
-        Net profit, gross profit, gross loss, fees total, max DD, total trades, avg hold time,
-        avg hold time win, avg hold time loss, sharpe & sortino portfolio and individual,
-        win:loss, long:short, RR portfolio and individual, avg RR winner, avg RR loser, EXP,
-        avg size, total winners, total losers, percent profitable, largest winner, largest loser
-        """
+    def metrics(self) -> str:
+
+        gross_profit = 0
+        gross_loss = 0
+        total_winners = 0
+        total_losers = 0
+        percent_profitable = 0
+        avg_r_winner = 0
+        avg_r_loser = 0
+        avg_r = 0
+        expectation = 0
+        avg_size = 0
+        largest_winner = 0
+        largest_loser = 0
+        total_fees = 0
+        avg_hold_time = 0
+        avg_hold_time_winner = 0
+        avg_hold_time_loser = 0
+        sharpe = 0
+        sortino = 0
+
+        return (
+            f"\nOpening equity: {self.start_equity} {self.currency}"
+            f"\nCurrent equity: {round(self.current_equity, 2)} {self.currency}"
+            f"\nHigh-water mark: {round(self.high_watermark, 2)} {self.currency}"
+            f"\nDrawdown-water mark: {round(self.drawdown_watermark, 2)} {self.currency}"
+            f"\nGross profit: {round(gross_profit, 2)} {self.currency}"
+            f"\nGross loss: {round(gross_loss, 2)} {self.currency}"
+            f"\nTotal trades: {self.total_trades}"
+            f"\nTotal winning trades: {total_winners}"
+            f"\nTotal losing trades: {total_losers}"
+            f"\nPercent profitable: {percent_profitable}"
+            f"\nAvg RR winners: {avg_r_winner}"
+            f"\nAvg RR losers {avg_r_loser}"
+            f"\nAvg RR portfolio: {avg_r}"
+            f"\nExpectation {expectation}"
+            f"\nSharpe: {sharpe}"
+            f"\nSortino: {sortino}"
+            f"\nTotal fees paid: {total_fees}"
+            f"\nAverage position size: {avg_size}"
+            f"\nLargest winner: {largest_winner}"
+            f"\nLargest loser: {largest_loser}"
+            f"\nAvg hold time: {avg_hold_time}"
+            f"\nAvg hold time winners: {avg_hold_time_winner}"
+            f"\nAvg avg_hold_time_loser: {avg_hold_time_loser}"
+
+        )
+
+    def strategy_metrics(self) -> str:
+        return ""
+
+    def equity_curve(self) -> None:
         pass
 
-    def summary(self) -> str:
+    def parameter_summary(self) -> str:
         return (
             f"\n** {self.name} **"
-            f"\nOpening balance: {self.start_equity} {self.currency}"
-            f"\nCurrent balance: {round(self.current_equity, 2)} {self.currency}"
             f"\nStart date: {self.start_date}"
             f"\nFinish date: {self.finish_date}"
             f"\nDuration: {pd.Timedelta(self.finish_date - self.start_date)}"
@@ -351,6 +409,7 @@ class TestPortfolio():
             f"\nSimulated flat transaction fee: {self.simulated_fee_flat} {self.currency}"
             f"\nSimulated percentage transaction fee: {self.simulated_fee_percentage}%"
             f"\nMax allowable drawdown before trading ceases: {self.drawdown_limit_percentage}%"
+            f"\nUse kelly criterion for sizing when available: {self.use_kelly}"
             f"\nMax exposure per trade when not using a kelly fraction: {self.max_risk_per_trade_percentage}%"
             # f"\nTarget instruments: {json.dumps(self.assets, indent=2)}"
             # f"\nAllocations: {json.dumps(self.allocations, indent=2)}"
