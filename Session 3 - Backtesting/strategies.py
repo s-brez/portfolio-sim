@@ -6,6 +6,8 @@ class EMACross50200:
     name = "EMACross50200"
     timeframe = "1d"
 
+    # flip_on_signalled_exit = True
+
     p_win = {}    # p_win[symbol][timeframe] ..
     avg_r = {}    # avg_r[symbol][timeframe] ..
 
@@ -28,12 +30,12 @@ class EMACross50200:
                 curr_slow = temp_df.iloc[index]["EMA200"]
                 curr_fast = temp_df.iloc[index]["EMA50"]
 
-                # Buy side check (fast > slow)
+                # Buy side check (fast crosses above slow)
                 if (prev_slow > prev_fast) and (curr_fast > curr_slow):
                     cross.iloc[index] = "BUY"
 
-                # Sell side check (slow > fast)
-                if (prev_slow < prev_fast) and (curr_fast < curr_slow):
+                # Sell side check (slow crosses above fast)
+                elif (prev_slow < prev_fast) and (curr_fast < curr_slow):
                     cross.iloc[index] = "SELL"
 
         return [("50EMA", fast_ema), ("200EMA", slow_ema), ("Cross", cross)]

@@ -241,7 +241,8 @@ class Backtester:
         finish_index = df.iloc[start_timestamp].name if finish_timestamp is not None else rows
         self.portfolio.finish_date = df.iloc[-1].name
 
-        print(f"Running simulation for {self.portfolio.name}...")
+        print(self.portfolio.parameter_summary())
+        print(f"\nRunning simulation for {self.portfolio.name}...")
 
         # Iterate dataframes timestamp by timestamp.
         for index in range(start_index, finish_index - 1):
@@ -260,7 +261,6 @@ class Backtester:
                                 signal['timeframe'] = strategy.timeframe
                                 signal['strategy'] = strategy.name
                                 signal['mode'] = "SIGNAL"
-
                                 self.process_signal(signal)
 
                         # 2. If price movement triggers a resting order.
@@ -282,4 +282,9 @@ class Backtester:
                 # TODO
                 pass
 
-        # TODO: implement position flip on exit signal.
+            # TODO: implement position flip on exit signal.
+            # Finish portfolio stuff
+            # Add mean reversion strategy
+            # DB integration
+
+        print("Simulation complete.")

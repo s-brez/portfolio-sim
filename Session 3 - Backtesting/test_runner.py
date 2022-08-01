@@ -8,9 +8,11 @@ def menu():
     print("\n1: Portfolio performance")
     # print("2: Strategy performance")
     # print("3: Equity curve")
-    print("4: Parameters")
-    print("5: Assets")
-    print("6: Allocations")
+    print("2:")
+    print("3:")
+    print("4: Risk and other parameters")
+    print("5: Target assets")
+    print("6: Asset class and strategy allocations")
     print("7: Transaction records")
     print("8: Trade records")
     print("9: Exit")
@@ -18,8 +20,6 @@ def menu():
 
 bt = Backtester(TestPortfolio())
 bt.start()
-
-print(bt.portfolio.parameter_summary())
 
 while(True):
 

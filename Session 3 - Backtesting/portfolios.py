@@ -262,6 +262,8 @@ class TestPortfolio():
         need to check against every order scenario in use by your basket of strategies.
         """
 
+        # TODO: update open equity.
+
         signal = None
 
         try:
@@ -344,6 +346,7 @@ class TestPortfolio():
 
     def metrics(self) -> str:
 
+        open_equity = 0
         gross_profit = 0
         gross_loss = 0
         total_winners = 0
@@ -352,7 +355,7 @@ class TestPortfolio():
         avg_r_winner = 0
         avg_r_loser = 0
         avg_r = 0
-        expectation = 0
+        expectancy = 0
         avg_size = 0
         largest_winner = 0
         largest_loser = 0
@@ -364,20 +367,23 @@ class TestPortfolio():
         sortino = 0
 
         return (
-            f"\nOpening equity: {self.start_equity} {self.currency}"
-            f"\nCurrent equity: {round(self.current_equity, 2)} {self.currency}"
-            f"\nHigh-water mark: {round(self.high_watermark, 2)} {self.currency}"
-            f"\nDrawdown-water mark: {round(self.drawdown_watermark, 2)} {self.currency}"
+            f"\nPeriod: {self.start_date} - {self.finish_date}"
+            f"\nStart equity: {self.start_equity} {self.currency}"
+            f"\nCurrent equity (realised): {round(self.current_equity, 2)} {self.currency}"
+            f"\nOpen equity (unrealised): {round(open_equity, 2)} {self.currency}"
+            f"\nHigh-water mark (realised): {round(self.high_watermark, 2)} {self.currency}"
+            f"\nDrawdown-water mark (realised): {round(self.drawdown_watermark, 2)} {self.currency}"
             f"\nGross profit: {round(gross_profit, 2)} {self.currency}"
             f"\nGross loss: {round(gross_loss, 2)} {self.currency}"
-            f"\nTotal trades: {self.total_trades}"
+            f"\nOpen trades: {self.position_count}"
+            f"\nClosed trades: {self.total_trades}"
             f"\nTotal winning trades: {total_winners}"
             f"\nTotal losing trades: {total_losers}"
             f"\nPercent profitable: {percent_profitable}"
             f"\nAvg RR winners: {avg_r_winner}"
             f"\nAvg RR losers {avg_r_loser}"
             f"\nAvg RR portfolio: {avg_r}"
-            f"\nExpectation {expectation}"
+            f"\nExpectancy {expectancy}"
             f"\nSharpe: {sharpe}"
             f"\nSortino: {sortino}"
             f"\nTotal fees paid: {total_fees}"
@@ -399,8 +405,7 @@ class TestPortfolio():
     def parameter_summary(self) -> str:
         return (
             f"\n** {self.name} **"
-            f"\nStart date: {self.start_date}"
-            f"\nFinish date: {self.finish_date}"
+            f"\nPeriod: {self.start_date} - {self.finish_date}"
             f"\nDuration: {pd.Timedelta(self.finish_date - self.start_date)}"
             f"\nTimeframes in use: {self.timeframes}"
             f"\nStrategies in use: {[s for s in self.strategies]}"
@@ -410,7 +415,7 @@ class TestPortfolio():
             f"\nSimulated percentage transaction fee: {self.simulated_fee_percentage}%"
             f"\nMax allowable drawdown before trading ceases: {self.drawdown_limit_percentage}%"
             f"\nUse kelly criterion for sizing when available: {self.use_kelly}"
-            f"\nMax exposure per trade when not using a kelly fraction: {self.max_risk_per_trade_percentage}%"
+            f"\nMax risk per trade when not using a kelly fraction: {self.max_risk_per_trade_percentage}%"
             # f"\nTarget instruments: {json.dumps(self.assets, indent=2)}"
             # f"\nAllocations: {json.dumps(self.allocations, indent=2)}"
             # f"\nPositions: {json.dumps(self.positions, indent=2)}"
