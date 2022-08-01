@@ -216,6 +216,9 @@ class Backtester:
 
         Limitations/assumptions:
             - Simulation supports only a single timeframe across all strategies (multiple strategies supported).
+                To extend this to multiple timeframes with the same/similar code, have datasets for all timeframes
+                synchronised on the date index. E.g. If combining 4h and 1d strategies, every sixth 4hr bar you'd
+                process 1 1d bar; the timestamp of every sixth 4h must match the next 1d.
             - Features requiring analysis of > 1 unit periods must have outputs condensed into a single unit.
                 see EmaCross50200 for example using Cross column.
             - Detection of resting order triggers not implemented (only stop loss orders), so the system is reliant
@@ -266,8 +269,9 @@ class Backtester:
                             # Calculate upnl for open positions based on final bar close price.
                             if index == finish_index - 2:
                                 close = self.data[asset_class][symbol][strategy.timeframe].iloc[index]['Close']
+                                timestamp = self.data[asset_class][symbol][strategy.timeframe].iloc[index].name
                                 self.portfolio.calculate_open_equity_for_position(
-                                    asset_class, symbol, strategy, close)
+                                    asset_class, symbol, strategy, close, timestamp)
 
                         # 2. If price movement triggers a resting order.
                         signal = self.portfolio.update_price(
