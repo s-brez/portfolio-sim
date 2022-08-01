@@ -205,6 +205,7 @@ class TestPortfolio():
                 'timeframe': signal['timeframe'],
                 'timestamp': signal['timestamp'],
                 'upnl': 0,
+                'r': 0
             }
 
             # Update position and transaction records.
@@ -362,7 +363,7 @@ class TestPortfolio():
             "close_timestamp": str(signal['timestamp']),
         })
 
-    def calculate_open_equity_for_position(self, asset_class: str, symbol: str, strategy: object, price: float, ) -> None:
+    def calculate_open_equity_for_position(self, asset_class: str, symbol: str, strategy: object, price: float, timestamp: datetime) -> None:
         """
         Finds unrealised pnl for a given position and adds it to self.open_equity.
         """
@@ -402,22 +403,47 @@ class TestPortfolio():
             if self.true_equity > self.high_watermark:
                 self.high_watermark = self.true_equity
 
-            print(self.positions[symbol][strategy.name])
-
-            # Dont save a transaction record because the position is still open.
+            # Add open positions to trade log - they arent realised yet but we will
+            # consider them as closed trade for sake of pnl/metric calcs.
+            self.trade_history.append({
+                "net_pnl": net_pnl,
+                "side": position['direction'],
+                "entry": entry,
+                "exit": exit,
+                "delta": delta,
+                "size": position["size"],
+                "fees": fees,
+                "strategy": strategy.name,
+                "symbol": symbol,
+                "exit_mode": "SIGNAL",
+                "asset_class": asset_class,
+                "open_timestamp": str(position['timestamp']),
+                "close_timestamp": str(timestamp),
+            })
 
     def metrics(self) -> str:
 
-        true_equity = self.open_equity + self.current_equity
-        avg_size_winner = 0
-        avg_size_loser = 0
-        avg_r_winner = 0
-        avg_r_loser = 0
-        avg_r = 0
+        final_equity = self.open_equity + self.current_equity
+
+        largest_winner, largest_loser = 0, 0
+        avg_size_winner, avg_size_loser = 0, 0
+        avg_r_winner, avg_r_loser, avg_r = 0, 0, 0
+
+        for trade in self.trade_history:
+            if trade['net_pnl'] > 0:
+                avg_size_winner += trade['size']
+                if trade['size'] > largest_winner:
+                    largest_winner = trade['size']
+            else:
+                avg_size_loser += trade['size']
+                if trade['size'] > largest_loser:
+                    largest_loser = trade['size']
+
+        avg_size_winner = round(avg_size_winner / self.total_winners, 2)
+        avg_size_loser = round(avg_size_loser / self.total_losers, 2)
+
         expectancy = 0
         avg_size = 0
-        largest_winner = 0
-        largest_loser = 0
         avg_hold_time = 0
         avg_hold_time_winner = 0
         avg_hold_time_loser = 0
@@ -430,14 +456,15 @@ class TestPortfolio():
             f"\nStart equity: {self.start_equity} {self.currency}"
             f"\nRealised equity: {round(self.current_equity, 2)} {self.currency}"
             f"\nOpen equity: {round(self.open_equity, 2)} {self.currency}"
-            f"\nNet ROI (realised + open): {round(true_equity, 2)} {self.currency}"
-            f"\nROI %: {round(abs((self.start_equity - true_equity) / self.start_equity) * 100, 2)}%"
+            f"\nFinal equity (realised + open): {round(final_equity, 2)} {self.currency}"
+            f"\nROI: {round(abs((self.start_equity - final_equity) / self.start_equity) * 100, 2)}%"
             f"\n--------------------------------------------------------------------------------"
             f"\nHigh-water mark: {round(self.high_watermark, 2)} {self.currency}"
             f"\nDrawdown-water mark: {round(self.drawdown_watermark, 2)} {self.currency}"
             f"\nFees paid: {round(self.total_fees, 2)} {self.currency}"
             f"\nGross profit: {round(self.gross_profit, 2)} {self.currency}"
             f"\nGross loss: {round(self.gross_loss, 2)} {self.currency}"
+            f"\nNet profit: {round(self.gross_profit - self.gross_loss - self.total_fees, 2)} {self.currency}"
             f"\n--------------------------------------------------------------------------------"
             f"\nOpen trades: {self.position_count}"
             f"\nClosed trades: {self.total_trades}"
@@ -445,12 +472,12 @@ class TestPortfolio():
             f"\nLosing trades: {self.total_losers}"
             f"\nPercent profitable: {round(self.total_winners / (self.position_count + self.total_trades), 5)}"
             f"\n--------------------------------------------------------------------------------"
-            f"\nLargest winner: {largest_winner}"
-            f"\nLargest loser: {largest_loser}"
-            f"\nAvg size winners: {avg_size_winner}"
-            f"\nAvg size losers: {avg_size_loser}"
-            f"\nAvg RR winners: {avg_r_winner}"
-            f"\nAvg RR losers {avg_r_loser}"
+            f"\nLargest winning position: {round(largest_winner, 2)} {self.currency}"
+            f"\nLargest losing position: {round(largest_loser, 2)} {self.currency}"
+            f"\nAvg size winning position: {avg_size_winner} {self.currency}"
+            f"\nAvg size losing position: {avg_size_loser} {self.currency}"
+            f"\nAvg RR winner: {avg_r_winner}"
+            f"\nAvg RR loser: {avg_r_loser}"
             f"\nAvg RR portfolio: {avg_r}"
             f"\n--------------------------------------------------------------------------------"
             f"\nExpectancy {expectancy}"
