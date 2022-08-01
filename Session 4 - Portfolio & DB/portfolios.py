@@ -14,7 +14,7 @@ class TestPortfolio():
         self.finish_date = None
         self.start_equity = 1000000
         self.current_equity = self.start_equity
-        self.open_equity = None
+        self.open_equity = 0
         self.trade_history = []                     # [{tx pnl data}, ..]
 
         self.positions = {}                         # positions[symbol][strategy] ..
@@ -23,14 +23,22 @@ class TestPortfolio():
 
         self.simulated_fee_flat = 5                 # dollar value added to each transaction cost
         self.simulated_fee_percentage = 0.025       # percentage of size added to each transaction cost
+
         self.max_simultaneous_positions = 10
         self.correlation_threshold = 1              # 1 for simplicity, allowing correlated trades
+
         self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
         self.drawdown_watermark = self.current_equity
         self.high_watermark = self.current_equity
 
         self.use_kelly = True
         self.max_risk_per_trade_percentage = 2.5    # max loss per trade, when not using kelly fraction.
+
+        self.total_fees = 0
+        self.gross_profit = 0
+        self.gross_loss = 0
+        self.total_winners = 0
+        self.total_losers = 0
 
         # This implementation is limited to supporting one timeframe.
         self.timeframes = ["1d"]
@@ -241,7 +249,7 @@ class TestPortfolio():
         self.allocations[asset_class]['strategy_allocations'][strategy]['in_use'] -= allocation
 
         # Update portfolio stats.
-        self.calculate_pnl(signal)
+        self.calculate_pnl_for_trade(signal)
 
         # Remove position from portfolio.
         self.positions[signal['symbol']][signal['strategy']] = None
@@ -303,7 +311,7 @@ class TestPortfolio():
 
         return signal
 
-    def calculate_pnl(self, signal: dict, stop=None) -> None:
+    def calculate_pnl_for_trade(self, signal: dict, stop=None) -> None:
         """
         Update equity with pnl for closed trade corresponding to parameter signal.
         """
@@ -311,15 +319,24 @@ class TestPortfolio():
         position = self.positions[signal['symbol']][signal['strategy']]
         entry = position['entry']
         exit = signal['entry'] if not stop else stop['price']
-        fees = position['fees'] * 2
+        fees = position['fees'] * 2  # entry and exit
 
         delta = abs((entry - exit) / entry) * 100
         pnl = abs((position['size'] / 100) * delta) - fees
+
+        self.total_fees += fees
 
         if position['direction'] == "BUY":
             net_pnl = pnl if exit > entry else -pnl
         else:
             net_pnl = pnl if exit < entry else -pnl
+
+        if net_pnl > 0:
+            self.total_winners += 1
+            self.gross_profit += abs((position['size'] / 100) * delta)
+        else:
+            self.total_losers += 1
+            self.gross_loss += abs((position['size'] / 100) * delta)
 
         self.current_equity += net_pnl
 
@@ -345,24 +362,55 @@ class TestPortfolio():
             "close_timestamp": str(signal['timestamp']),
         })
 
-    def calculate_open_equity_for_position(self, asset_class: str, symbol: str, strategy: object) -> None:
+    def calculate_open_equity_for_position(self, asset_class: str, symbol: str, strategy: object, price: float, ) -> None:
         """
         Finds unrealised pnl for a given position and adds it to self.open_equity.
         """
 
         position = self.positions[symbol][strategy.name]
         if position:
-            print(position)
 
-        self.open_equity = 0
+            entry = position['entry']
+            exit = price
+            fees = position['fees']  # entry fee only as posiition is still open
+
+            delta = abs((entry - exit) / entry) * 100
+            pnl = abs((position['size'] / 100) * delta) - fees
+
+            if position['direction'] == "BUY":
+                net_pnl = pnl if exit > entry else -pnl
+            else:
+                net_pnl = pnl if exit < entry else -pnl
+
+            if net_pnl > 0:
+                self.total_winners += 1
+                self.gross_profit += abs((position['size'] / 100) * delta)
+            else:
+                self.total_losers += 1
+                self.gross_loss += abs((position['size'] / 100) * delta)
+
+            self.total_fees += fees
+
+            self.open_equity += net_pnl
+            self.positions[symbol][strategy.name]['upnl'] = net_pnl
+
+            self.true_equity = self.open_equity + self.current_equity
+
+            if self.true_equity < self.drawdown_watermark:
+                self.drawdown_watermark = self.true_equity
+
+            if self.true_equity > self.high_watermark:
+                self.high_watermark = self.true_equity
+
+            print(self.positions[symbol][strategy.name])
+
+            # Dont save a transaction record because the position is still open.
 
     def metrics(self) -> str:
 
-        gross_profit = 0
-        gross_loss = 0
-        total_winners = 0
-        total_losers = 0
-        percent_profitable = 0
+        true_equity = self.open_equity + self.current_equity
+        avg_size_winner = 0
+        avg_size_loser = 0
         avg_r_winner = 0
         avg_r_loser = 0
         avg_r = 0
@@ -370,7 +418,6 @@ class TestPortfolio():
         avg_size = 0
         largest_winner = 0
         largest_loser = 0
-        total_fees = 0
         avg_hold_time = 0
         avg_hold_time_winner = 0
         avg_hold_time_loser = 0
@@ -378,32 +425,42 @@ class TestPortfolio():
         sortino = 0
 
         return (
-            f"\nPeriod: {self.start_date} - {self.finish_date}"
+            f"{self.parameter_summary()}"
+            f"\n--------------------------------------------------------------------------------"
             f"\nStart equity: {self.start_equity} {self.currency}"
-            f"\nCurrent equity (realised): {round(self.current_equity, 2)} {self.currency}"
-            f"\nOpen equity (unrealised): {round(self.open_equity, 2)} {self.currency}"
-            f"\nHigh-water mark (realised): {round(self.high_watermark, 2)} {self.currency}"
-            f"\nDrawdown-water mark (realised): {round(self.drawdown_watermark, 2)} {self.currency}"
-            f"\nGross profit: {round(gross_profit, 2)} {self.currency}"
-            f"\nGross loss: {round(gross_loss, 2)} {self.currency}"
+            f"\nRealised equity: {round(self.current_equity, 2)} {self.currency}"
+            f"\nOpen equity: {round(self.open_equity, 2)} {self.currency}"
+            f"\nNet ROI (realised + open): {round(true_equity, 2)} {self.currency}"
+            f"\nROI %: {round(abs((self.start_equity - true_equity) / self.start_equity) * 100, 2)}%"
+            f"\n--------------------------------------------------------------------------------"
+            f"\nHigh-water mark: {round(self.high_watermark, 2)} {self.currency}"
+            f"\nDrawdown-water mark: {round(self.drawdown_watermark, 2)} {self.currency}"
+            f"\nFees paid: {round(self.total_fees, 2)} {self.currency}"
+            f"\nGross profit: {round(self.gross_profit, 2)} {self.currency}"
+            f"\nGross loss: {round(self.gross_loss, 2)} {self.currency}"
+            f"\n--------------------------------------------------------------------------------"
             f"\nOpen trades: {self.position_count}"
             f"\nClosed trades: {self.total_trades}"
-            f"\nTotal winning trades: {total_winners}"
-            f"\nTotal losing trades: {total_losers}"
-            f"\nPercent profitable: {percent_profitable}"
+            f"\nWinning trades: {self.total_winners}"
+            f"\nLosing trades: {self.total_losers}"
+            f"\nPercent profitable: {round(self.total_winners / (self.position_count + self.total_trades), 5)}"
+            f"\n--------------------------------------------------------------------------------"
+            f"\nLargest winner: {largest_winner}"
+            f"\nLargest loser: {largest_loser}"
+            f"\nAvg size winners: {avg_size_winner}"
+            f"\nAvg size losers: {avg_size_loser}"
             f"\nAvg RR winners: {avg_r_winner}"
             f"\nAvg RR losers {avg_r_loser}"
             f"\nAvg RR portfolio: {avg_r}"
+            f"\n--------------------------------------------------------------------------------"
             f"\nExpectancy {expectancy}"
             f"\nSharpe: {sharpe}"
             f"\nSortino: {sortino}"
-            f"\nTotal fees paid: {total_fees}"
+            f"\n--------------------------------------------------------------------------------"
             f"\nAverage position size: {avg_size}"
-            f"\nLargest winner: {largest_winner}"
-            f"\nLargest loser: {largest_loser}"
             f"\nAvg hold time: {avg_hold_time}"
             f"\nAvg hold time winners: {avg_hold_time_winner}"
-            f"\nAvg avg_hold_time_loser: {avg_hold_time_loser}"
+            f"\nAvg hold time losers: {avg_hold_time_loser}"
 
         )
 

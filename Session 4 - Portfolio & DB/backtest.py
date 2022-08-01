@@ -265,8 +265,9 @@ class Backtester:
 
                             # Calculate upnl for open positions based on final bar close price.
                             if index == finish_index - 2:
+                                close = self.data[asset_class][symbol][strategy.timeframe].iloc[index]['Close']
                                 self.portfolio.calculate_open_equity_for_position(
-                                    asset_class, symbol, strategy)
+                                    asset_class, symbol, strategy, close)
 
                         # 2. If price movement triggers a resting order.
                         signal = self.portfolio.update_price(
