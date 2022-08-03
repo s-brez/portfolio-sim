@@ -1,5 +1,5 @@
 from dateutil.relativedelta import relativedelta
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import json
 
@@ -437,28 +437,33 @@ class TestPortfolio():
         largest_winner, largest_loser = 0, 0
         avg_size_winner, avg_size_loser, avg_size = 0, 0, 0
         avg_r_winner, avg_r_loser, r_portfolio = 0, 0, 0
-        percent_profitable, expectancy, exp_return, std_dev, sharpe, sortino = 0, 0, 0, 0, 0, 0
+        exp_return, std_dev, sharpe, sortino = 0, 0, 0, 0
+        avg_hold_time, avg_hold_time_loser, avg_hold_time_winner = timedelta(), timedelta(), timedelta()
 
-        # Iterate trade records once, record/tally everything required, then run final calculations.
+        # Iterate trade records once, tally everything required, then run final calculations.
         for index, trade in enumerate(self.trade_history):
 
             abs_r = abs(trade['entry'] - trade['exit']) / abs(trade['entry'] - trade['stop'])
             r = abs_r if trade['net_pnl'] > 0 else -abs_r
             self.trade_history[index]['r'] = r  # Store R per trade for later calcs
 
-            avg_size += trade['size']
+            fs = "%Y-%m-%d %H:%M:%S"
+            hold_time = datetime.strptime(trade['close_timestamp'], fs) - datetime.strptime(trade['open_timestamp'], fs)
 
-            # self.strategies[trade['strategy']].trades[trade['symbol']][trade['timeframe']].append(trade)
+            avg_size += trade['size']
+            avg_hold_time += hold_time
 
             if trade['net_pnl'] > 0:
                 avg_size_winner += trade['size']
                 avg_r_winner += r
+                avg_hold_time_winner += hold_time
                 if trade['size'] > largest_winner:
                     largest_winner = trade['size']
 
             else:
                 avg_r_loser += r
                 avg_size_loser += trade['size']
+                avg_hold_time_loser += hold_time
                 if trade['size'] > largest_loser:
                     largest_loser = trade['size']
 
@@ -471,10 +476,9 @@ class TestPortfolio():
         win_loss = self.total_winners / (self.position_count + self.total_trades)
         expectancy_qty = round((win_loss * avg_size_winner) - ((1 - win_loss) * avg_size_loser), 2)
         expectancy_ratio = round((r_portfolio * win_loss) - (1 - win_loss), 5)
-
-        avg_hold_time = 0
-        avg_hold_time_winner = 0
-        avg_hold_time_loser = 0
+        avg_hold_time = avg_hold_time / self.total_trades
+        avg_hold_time_winner = avg_hold_time_winner / self.total_winners
+        avg_hold_time_loser = avg_hold_time_loser / self.total_losers
 
         # Per strategy
         for strategy in self.strategies.values():
@@ -501,16 +505,6 @@ class TestPortfolio():
                 f"\nGross loss: {round(self.gross_loss, 2)} {self.currency}"
                 f"\nNet profit: {round(self.gross_profit - self.gross_loss - self.total_fees, 2)} {self.currency}"
                 f"\n--------------------------------------------------------------------------------"
-                f"\nLargest winning position: {round(largest_winner, 2)} {self.currency}"
-                f"\nLargest losing position: {round(largest_loser, 2)} {self.currency}"
-                f"\nAvg size winning position: {avg_size_winner} {self.currency}"
-                f"\nAvg size losing position: {avg_size_loser} {self.currency}"
-                f"\nAvg position size: {avg_size} {self.currency}"
-                f"\nAvg R winner: {avg_r_winner}"
-                f"\nAvg R loser: {avg_r_loser}"
-                f"\nPortfolio R: {r_portfolio}"
-                f"\n--------------------------------------------------------------------------------"
-                f"\nAverage position size: {avg_size}"
                 f"\nAvg hold time: {avg_hold_time}"
                 f"\nAvg hold time winners: {avg_hold_time_winner}"
                 f"\nAvg hold time losers: {avg_hold_time_loser}"
@@ -522,6 +516,15 @@ class TestPortfolio():
                 f"\nWin/loss: {round(win_loss, 2)}"
                 f"\nExpectancy ($): {expectancy_qty} {self.currency}"
                 f"\nExpectancy ratio: {expectancy_ratio}"
+                f"\n--------------------------------------------------------------------------------"
+                f"\nLargest winning position: {round(largest_winner, 2)} {self.currency}"
+                f"\nLargest losing position: {round(largest_loser, 2)} {self.currency}"
+                f"\nAvg size winning position: {avg_size_winner} {self.currency}"
+                f"\nAvg size losing position: {avg_size_loser} {self.currency}"
+                f"\nAvg position size: {avg_size} {self.currency}"
+                f"\nAvg R winner: {avg_r_winner}"
+                f"\nAvg R loser: {avg_r_loser}"
+                f"\nAvg R portfolio: {r_portfolio}"
                 f"\n--------------------------------------------------------------------------------"
                 f"\nSharpe: {sharpe}"
                 f"\nSortino: {sortino}"
