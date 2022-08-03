@@ -230,14 +230,16 @@ class Backtester:
             - Assumes stops are filled at their trigger price.
         """
 
+        strategies = [s['object'] for s in self.portfolio.strategies.values()]
+
         # Do pre-processing.
-        self.apply_features_all_datasets(self.data, self.portfolio.strategies.values(), self.portfolio.assets_flattened)
+        self.apply_features_all_datasets(self.data, strategies, self.portfolio.assets_flattened)
         self.c_matrix = self.correlation_matrix(self.data, self.portfolio.timeframes, self.portfolio.assets_flattened)
 
         # Use first asset's dataset for start/finish indexing.
         asset_class = list(self.portfolio.assets.keys())[0]
         symbol = self.portfolio.assets[asset_class][0]
-        timeframe = list(self.portfolio.strategies.values())[0].timeframe
+        timeframe = strategies[0].timeframe
         df = self.data[asset_class][symbol][timeframe]
         rows = df.shape[0]
         start_index = df.iloc[start_timestamp].name if start_timestamp is not None else 0
@@ -255,7 +257,7 @@ class Backtester:
 
                         # Positions can be opened/closed/modified two ways:
                         # 1. Directly with a buy/sell signal, as derived from feature data during pre-processing
-                        for strategy in self.portfolio.strategies.values():
+                        for strategy in strategies:
                             signal = strategy.check_for_signal(
                                 self.data[asset_class][symbol][strategy.timeframe].iloc[index])
                             if signal:
@@ -288,4 +290,5 @@ class Backtester:
         # Add mean reversion strategy
         # DB integration
 
+        self.portfolio.metrics(display=False)
         print("Simulation complete.")

@@ -1,6 +1,7 @@
 from dateutil.relativedelta import relativedelta
 from datetime import datetime
 import pandas as pd
+import json
 
 from strategies import EMACross50200
 
@@ -33,6 +34,7 @@ class TestPortfolio():
 
         self.use_kelly = True
         self.max_risk_per_trade_percentage = 2.5    # max loss per trade, when not using kelly fraction.
+        self.risk_free_rate = 3.04                  # US treasury bill 12 month yeild as at 03/08/22.
 
         self.total_fees = 0
         self.gross_profit = 0
@@ -43,10 +45,6 @@ class TestPortfolio():
         # This implementation is limited to supporting one timeframe.
         self.timeframes = ["1d"]
 
-        self.strategies = {
-            "EMACross50200": EMACross50200
-        }
-
         self.assets = {
             "EQUITIES": ["GOOGL", "AMZN", "TSLA", "F"],
             "CURRENCIES": ["EURUSD=X", "GBPUSD=X", "AUDUSD=X"],
@@ -56,6 +54,14 @@ class TestPortfolio():
         }
 
         self.assets_flattened = [i for j in self.assets.values() for i in j]
+
+        self.strategies = {
+            "EMACross50200": {
+                "object": EMACross50200,
+                "trades": {symbol: {} for symbol in self.assets_flattened},  # trades[symbol][timeframe] = [{trade, ..}]
+            }
+        }
+
         self.transaction_history = {a: {s: [] for s in self.strategies.keys()} for a in self.assets_flattened}   # tx_history[symbol][strategy] ..
 
         # Asset class allocations across all asset classes must total 100.
@@ -142,9 +148,9 @@ class TestPortfolio():
 
         try:
             # Kelly fraction.
-            avg_r = self.strategies[signal['strategy']].avg_r[signal['symbol']][signal['timeframe']]
+            avg_r = self.strategies[signal['strategy']]['object'].avg_r[signal['symbol']][signal['timeframe']]
             r_adjusted_target = signal['entry'] * avg_r if signal['direction'] == "BUY" else signal['entry'] * -avg_r
-            p_win = self.strategies[signal['strategy']].p_win[signal['symbol']][signal['timeframe']]
+            p_win = self.strategies[signal['strategy']]['object'].p_win[signal['symbol']][signal['timeframe']]
             p_lose = 1 - p_win
             f_lost = abs((signal['stop'] - signal['entry']) / signal['entry'])  # % change from entry to stop.
             f_won = abs((r_adjusted_target - signal['entry']) / signal['entry'])  # % change from entry to R adjusted target.
@@ -353,9 +359,11 @@ class TestPortfolio():
             "entry": entry,
             "exit": exit,
             "delta": delta,
+            "stop": position['stop'],
             "size": position["size"],
             "fees": fees,
             "strategy": signal['strategy'],
+            "timeframe": signal['timeframe'],
             "symbol": signal['symbol'],
             "exit_mode": signal['mode'],
             "asset_class": signal['asset_class'],
@@ -411,9 +419,11 @@ class TestPortfolio():
                 "entry": entry,
                 "exit": exit,
                 "delta": delta,
+                "stop": position['stop'],
                 "size": position["size"],
                 "fees": fees,
                 "strategy": strategy.name,
+                "timeframe": position['timeframe'],
                 "symbol": symbol,
                 "exit_mode": "SIGNAL",
                 "asset_class": asset_class,
@@ -421,78 +431,107 @@ class TestPortfolio():
                 "close_timestamp": str(timestamp),
             })
 
-    def metrics(self) -> str:
+    def metrics(self, display=True) -> str:
 
         final_equity = self.open_equity + self.current_equity
-
         largest_winner, largest_loser = 0, 0
-        avg_size_winner, avg_size_loser = 0, 0
-        avg_r_winner, avg_r_loser, avg_r = 0, 0, 0
+        avg_size_winner, avg_size_loser, avg_size = 0, 0, 0
+        avg_r_winner, avg_r_loser, r_portfolio = 0, 0, 0
+        percent_profitable, expectancy, exp_return, std_dev, sharpe, sortino = 0, 0, 0, 0, 0, 0
 
-        for trade in self.trade_history:
+        # Iterate trade records once, record/tally everything required, then run final calculations.
+        for index, trade in enumerate(self.trade_history):
+
+            abs_r = abs(trade['entry'] - trade['exit']) / abs(trade['entry'] - trade['stop'])
+            r = abs_r if trade['net_pnl'] > 0 else -abs_r
+            self.trade_history[index]['r'] = r  # Store R per trade for later calcs
+
+            avg_size += trade['size']
+
+            # self.strategies[trade['strategy']].trades[trade['symbol']][trade['timeframe']].append(trade)
+
             if trade['net_pnl'] > 0:
                 avg_size_winner += trade['size']
+                avg_r_winner += r
                 if trade['size'] > largest_winner:
                     largest_winner = trade['size']
+
             else:
+                avg_r_loser += r
                 avg_size_loser += trade['size']
                 if trade['size'] > largest_loser:
                     largest_loser = trade['size']
 
         avg_size_winner = round(avg_size_winner / self.total_winners, 2)
         avg_size_loser = round(avg_size_loser / self.total_losers, 2)
+        avg_size = round(avg_size / self.total_trades, 2)
+        avg_r_winner = round(avg_r_winner / self.total_winners, 2)
+        avg_r_loser = round(avg_r_loser / self.total_losers, 2)
+        r_portfolio = round(avg_size_winner / avg_size_loser, 2)
+        win_loss = self.total_winners / (self.position_count + self.total_trades)
+        expectancy_qty = round((win_loss * avg_size_winner) - ((1 - win_loss) * avg_size_loser), 2)
+        expectancy_ratio = round((r_portfolio * win_loss) - (1 - win_loss), 5)
 
-        expectancy = 0
-        avg_size = 0
         avg_hold_time = 0
         avg_hold_time_winner = 0
         avg_hold_time_loser = 0
+
+        # Per strategy
+        for strategy in self.strategies.values():
+            pass
+
+        exp_return = 0
         sharpe = 0
         sortino = 0
 
-        return (
-            f"{self.parameter_summary()}"
-            f"\n--------------------------------------------------------------------------------"
-            f"\nStart equity: {self.start_equity} {self.currency}"
-            f"\nRealised equity: {round(self.current_equity, 2)} {self.currency}"
-            f"\nOpen equity: {round(self.open_equity, 2)} {self.currency}"
-            f"\nFinal equity (realised + open): {round(final_equity, 2)} {self.currency}"
-            f"\nROI: {round(abs((self.start_equity - final_equity) / self.start_equity) * 100, 2)}%"
-            f"\n--------------------------------------------------------------------------------"
-            f"\nHigh-water mark: {round(self.high_watermark, 2)} {self.currency}"
-            f"\nDrawdown-water mark: {round(self.drawdown_watermark, 2)} {self.currency}"
-            f"\nFees paid: {round(self.total_fees, 2)} {self.currency}"
-            f"\nGross profit: {round(self.gross_profit, 2)} {self.currency}"
-            f"\nGross loss: {round(self.gross_loss, 2)} {self.currency}"
-            f"\nNet profit: {round(self.gross_profit - self.gross_loss - self.total_fees, 2)} {self.currency}"
-            f"\n--------------------------------------------------------------------------------"
-            f"\nOpen trades: {self.position_count}"
-            f"\nClosed trades: {self.total_trades}"
-            f"\nWinning trades: {self.total_winners}"
-            f"\nLosing trades: {self.total_losers}"
-            f"\nPercent profitable: {round(self.total_winners / (self.position_count + self.total_trades), 5)}"
-            f"\n--------------------------------------------------------------------------------"
-            f"\nLargest winning position: {round(largest_winner, 2)} {self.currency}"
-            f"\nLargest losing position: {round(largest_loser, 2)} {self.currency}"
-            f"\nAvg size winning position: {avg_size_winner} {self.currency}"
-            f"\nAvg size losing position: {avg_size_loser} {self.currency}"
-            f"\nAvg RR winner: {avg_r_winner}"
-            f"\nAvg RR loser: {avg_r_loser}"
-            f"\nAvg RR portfolio: {avg_r}"
-            f"\n--------------------------------------------------------------------------------"
-            f"\nExpectancy {expectancy}"
-            f"\nSharpe: {sharpe}"
-            f"\nSortino: {sortino}"
-            f"\n--------------------------------------------------------------------------------"
-            f"\nAverage position size: {avg_size}"
-            f"\nAvg hold time: {avg_hold_time}"
-            f"\nAvg hold time winners: {avg_hold_time_winner}"
-            f"\nAvg hold time losers: {avg_hold_time_loser}"
+        if display:
+            output = (
+                f"{self.parameter_summary()}"
+                f"\n--------------------------------------------------------------------------------"
+                f"\nStart equity: {self.start_equity} {self.currency}"
+                f"\nRealised equity: {round(self.current_equity, 2)} {self.currency}"
+                f"\nOpen equity: {round(self.open_equity, 2)} {self.currency}"
+                f"\nFinal equity: {round(final_equity, 2)} {self.currency}"
+                f"\nROI: {round(abs((self.start_equity - final_equity) / self.start_equity) * 100, 2)}%"
+                f"\n--------------------------------------------------------------------------------"
+                f"\nHigh-water mark: {round(self.high_watermark, 2)} {self.currency}"
+                f"\nDrawdown-water mark: {round(self.drawdown_watermark, 2)} {self.currency}"
+                f"\nFees paid: {round(self.total_fees, 2)} {self.currency}"
+                f"\nGross profit: {round(self.gross_profit, 2)} {self.currency}"
+                f"\nGross loss: {round(self.gross_loss, 2)} {self.currency}"
+                f"\nNet profit: {round(self.gross_profit - self.gross_loss - self.total_fees, 2)} {self.currency}"
+                f"\n--------------------------------------------------------------------------------"
+                f"\nLargest winning position: {round(largest_winner, 2)} {self.currency}"
+                f"\nLargest losing position: {round(largest_loser, 2)} {self.currency}"
+                f"\nAvg size winning position: {avg_size_winner} {self.currency}"
+                f"\nAvg size losing position: {avg_size_loser} {self.currency}"
+                f"\nAvg position size: {avg_size} {self.currency}"
+                f"\nAvg R winner: {avg_r_winner}"
+                f"\nAvg R loser: {avg_r_loser}"
+                f"\nPortfolio R: {r_portfolio}"
+                f"\n--------------------------------------------------------------------------------"
+                f"\nAverage position size: {avg_size}"
+                f"\nAvg hold time: {avg_hold_time}"
+                f"\nAvg hold time winners: {avg_hold_time_winner}"
+                f"\nAvg hold time losers: {avg_hold_time_loser}"
+                f"\n--------------------------------------------------------------------------------"
+                f"\nOpen trades: {self.position_count}"
+                f"\nClosed trades: {self.total_trades}"
+                f"\nWinning trades: {self.total_winners}"
+                f"\nLosing trades: {self.total_losers}"
+                f"\nWin/loss: {round(win_loss, 2)}"
+                f"\nExpectancy ($): {expectancy_qty} {self.currency}"
+                f"\nExpectancy ratio: {expectancy_ratio}"
+                f"\n--------------------------------------------------------------------------------"
+                f"\nSharpe: {sharpe}"
+                f"\nSortino: {sortino}"
+                f"\nStd. dev: {std_dev}"
+                f"\nExpected return: {exp_return}"
+            )
+        else:
+            output = ""
 
-        )
-
-    def strategy_metrics(self) -> str:
-        return ""
+        return output
 
     def equity_curve(self) -> None:
         pass
@@ -504,14 +543,13 @@ class TestPortfolio():
             f"\nDuration: {pd.Timedelta(self.finish_date - self.start_date)}"
             f"\nTimeframes in use: {self.timeframes}"
             f"\nStrategies in use: {[s for s in self.strategies]}"
-            f"\nMax open positions allowed: {self.max_simultaneous_positions}"
-            f"\nMax allowable correlation between positions: {self.correlation_threshold}"
+            f"\nMax open positions at a time: {self.max_simultaneous_positions}"
+            f"\nMax correlation between positions: {self.correlation_threshold}"
             f"\nSimulated flat transaction fee: {self.simulated_fee_flat} {self.currency}"
             f"\nSimulated percentage transaction fee: {self.simulated_fee_percentage}%"
-            f"\nMax allowable drawdown before trading ceases: {self.drawdown_limit_percentage}%"
+            f"\nMax drawdown before trading ceases: {self.drawdown_limit_percentage}%"
             f"\nUse kelly criterion for sizing when available: {self.use_kelly}"
             f"\nMax risk per trade when not using a kelly fraction: {self.max_risk_per_trade_percentage}%"
-            # f"\nTarget instruments: {json.dumps(self.assets, indent=2)}"
-            # f"\nAllocations: {json.dumps(self.allocations, indent=2)}"
-            # f"\nPositions: {json.dumps(self.positions, indent=2)}"
+            f"\nTarget instruments: {self.assets}"
+            f"\nAllocations: {json.dumps(self.allocations, indent=2)}"
         )

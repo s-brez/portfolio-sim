@@ -8,8 +8,8 @@ class EMACross50200:
 
     # flip_on_signalled_exit = True
 
-    p_win = {}    # p_win[symbol][timeframe] ..
-    avg_r = {}    # avg_r[symbol][timeframe] ..
+    p_win = {}     # p_win[symbol][timeframe] = float
+    avg_r = {}     # avg_r[symbol][timeframe] = float
 
     def feature_data(data: pd.DataFrame, slow=200, fast=50) -> [pd.Series]:
         """
