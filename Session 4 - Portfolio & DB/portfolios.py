@@ -359,6 +359,8 @@ class TestPortfolio():
             "entry": entry,
             "exit": exit,
             "delta": delta,
+            "stop_delta": 0,
+            "target_delta": 0,
             "stop": position['stop'],
             "size": position["size"],
             "fees": fees,
@@ -382,6 +384,9 @@ class TestPortfolio():
             entry = position['entry']
             exit = price
             fees = position['fees']  # entry fee only as posiition is still open
+
+            # If trade profitable, target_delta = delta
+            # if trade not profitable, target = specified target, or default R distance multiple from entry.
 
             delta = abs((entry - exit) / entry) * 100
             pnl = abs((position['size'] / 100) * delta) - fees
@@ -419,6 +424,8 @@ class TestPortfolio():
                 "entry": entry,
                 "exit": exit,
                 "delta": delta,
+                "stop_delta": 0,
+                "target_delta": 0,
                 "stop": position['stop'],
                 "size": position["size"],
                 "fees": fees,
@@ -445,13 +452,20 @@ class TestPortfolio():
 
             abs_r = abs(trade['entry'] - trade['exit']) / abs(trade['entry'] - trade['stop'])
             r = abs_r if trade['net_pnl'] > 0 else -abs_r
-            self.trade_history[index]['r'] = r  # Store R per trade for later calcs
+            self.trade_history[index]['r'] = r
 
             fs = "%Y-%m-%d %H:%M:%S"
             hold_time = datetime.strptime(trade['close_timestamp'], fs) - datetime.strptime(trade['open_timestamp'], fs)
-
+            self.trade_history[index]['hold_time'] = hold_time
             avg_size += trade['size']
             avg_hold_time += hold_time
+
+            # Group trades by symbol and timeframe under each strategy.
+            try:
+                self.strategies[trade['strategy']]['trades'][trade['symbol']][trade['timeframe']].append(trade)
+            except KeyError:
+                self.strategies[trade['strategy']]['trades'][trade['symbol']][trade['timeframe']] = []
+                self.strategies[trade['strategy']]['trades'][trade['symbol']][trade['timeframe']].append(trade)
 
             if trade['net_pnl'] > 0:
                 avg_size_winner += trade['size']
@@ -473,18 +487,15 @@ class TestPortfolio():
         avg_r_winner = round(avg_r_winner / self.total_winners, 2)
         avg_r_loser = round(avg_r_loser / self.total_losers, 2)
         r_portfolio = round(avg_size_winner / avg_size_loser, 2)
-        win_loss = self.total_winners / (self.position_count + self.total_trades)
-        expectancy_qty = round((win_loss * avg_size_winner) - ((1 - win_loss) * avg_size_loser), 2)
-        expectancy_ratio = round((r_portfolio * win_loss) - (1 - win_loss), 5)
+        p_win = round(self.total_winners / (self.position_count + self.total_trades), 5)
+        win_loss = self.total_winners / self.total_losers
+        expectancy_qty = round((p_win * avg_size_winner) - ((1 - p_win) * avg_size_loser), 2)
+        expectancy_ratio = round((r_portfolio * p_win) - (1 - p_win), 5)
         avg_hold_time = avg_hold_time / self.total_trades
         avg_hold_time_winner = avg_hold_time_winner / self.total_winners
         avg_hold_time_loser = avg_hold_time_loser / self.total_losers
 
-        # Per strategy
-        for strategy in self.strategies.values():
-            pass
-
-        exp_return = 0
+        exp_return = 0  # exp return of each strategy * weighting of strategy
         sharpe = 0
         sortino = 0
 
@@ -514,6 +525,7 @@ class TestPortfolio():
                 f"\nWinning trades: {self.total_winners}"
                 f"\nLosing trades: {self.total_losers}"
                 f"\nWin/loss: {round(win_loss, 2)}"
+                f"\nP_win: {p_win}"
                 f"\nExpectancy ($): {expectancy_qty} {self.currency}"
                 f"\nExpectancy ratio: {expectancy_ratio}"
                 f"\n--------------------------------------------------------------------------------"
@@ -526,13 +538,112 @@ class TestPortfolio():
                 f"\nAvg R loser: {avg_r_loser}"
                 f"\nAvg R portfolio: {r_portfolio}"
                 f"\n--------------------------------------------------------------------------------"
-                f"\nSharpe: {sharpe}"
-                f"\nSortino: {sortino}"
-                f"\nStd. dev: {std_dev}"
-                f"\nExpected return: {exp_return}"
+                f"\nPortfolio std. dev: {std_dev}"
+                f"\nPortfolio Sharpe: {sharpe}"
+                f"\nPortfolio Sortino: {sortino}"
+                f"\nPortfolio expected return: {exp_return}"
+                f"\n--------------------------------------------------------------------------------"
             )
         else:
             output = ""
+
+        return output
+
+    # self.strategies = {
+    #     "EMACross50200": {
+    #         "object": EMACross50200,
+    #         "trades":  trades[symbol][timeframe] = [{trade, ..}]
+    # }
+    def strategy_metrics(self, display=True) -> str:
+
+        output = ""
+        for strategy in self.strategies.values():
+            for symbol in strategy['trades'].keys():
+                for timeframe in self.strategies[strategy['object'].name]['trades'][symbol].keys():
+
+                    pnl, total_trades, winners, losers, win_loss, p_win = 0, 0, 0, 0, 0, 0
+                    avg_size, avg_size_winner, avg_size_loser = 0, 0, 0
+                    avg_r_winner, avg_r_loser, avg_r_strategy = 0, 0, 0
+                    expectancy_qty, expectancy_ratio = 0, 0
+                    exp_return, sharpe, sortino, std_dev = 0, 0, 0, 0
+                    avg_hold_time = timedelta()
+
+                    for index, trade in enumerate(self.strategies[strategy['object'].name]['trades'][symbol][timeframe]):
+
+                        avg_size += trade['size']
+                        avg_hold_time += trade['hold_time']
+                        avg_r_strategy += trade['r']
+                        total_trades += 1
+                        pnl += trade['net_pnl']
+
+                        if trade['net_pnl'] > 0:
+                            winners += 1
+                            avg_size_winner += trade['size']
+                            avg_r_winner += trade['r']
+
+                        else:
+                            losers += 1
+                            avg_size_loser += trade['size']
+                            avg_r_loser += trade['r']
+
+                    # Handle zero division where no wins/loses for a particular strategy/asset/timeframe.
+                    if losers == 0 and winners > 0:
+                        win_loss = 1.0
+                    elif losers > 0 and winners > 0:
+                        win_loss = winners / losers
+
+                    if total_trades > 0:
+                        pnl = round(pnl / total_trades, 2)
+                        avg_size = round(avg_size / total_trades, 2)
+                        avg_r_strategy = round(avg_r_strategy / total_trades, 2)
+                        avg_hold_time = avg_hold_time / total_trades
+
+                    if winners > 0:
+                        avg_size_winner = round(avg_size_winner / winners, 2)
+                        avg_r_winner = round(avg_r_winner / winners, 2)
+                        p_win = round(winners / total_trades, 5)
+                        expectancy_ratio = round((avg_r_strategy * p_win) - (1 - p_win), 5)
+                    else:
+                        expectancy_ratio = "N/A"
+
+                    if losers > 0:
+                        avg_size_loser = round(avg_size_loser / losers, 2)
+                        avg_r_loser = round(avg_r_loser / losers, 2)
+
+                    if winners > 0 and losers > 0:
+                        expectancy_qty = round((p_win * avg_size_winner) - ((1 - p_win) * avg_size_loser), 2)
+                    else:
+                        expectancy_qty = "N/A"
+
+                    if p_win > 0:
+                        for trade in self.strategies[strategy['object'].name]['trades'][symbol][timeframe]:
+                            # (% gained for win * p_win) + (% lost for loss * p_loss) + ..
+                            exp_return += (trade['target_delta'] * p_win) + (trade['stop_delta'] * (1 - p_win))
+                        exp_return = round(exp_return, 2)
+                    else:
+                        exp_return = "N/A"
+
+                    sharpe, sortino, std_dev = 0, 0, 0
+
+                    output += (
+                        f"\n{strategy['object'].name} {symbol} {timeframe}: "
+                        f"\nNet profit: {pnl} {self.currency}"
+                        f"\nWinners: {winners} | Losers: {losers}"
+                        f"\nWin/loss: {round(win_loss, 2)}"
+                        f"\nP_win: {p_win}"
+                        f"\nAvg size winning position: {avg_size_winner} {self.currency}"
+                        f"\nAvg size losing position: {avg_size_loser} {self.currency}"
+                        f"\nAvg position size: {avg_size} {self.currency}"
+                        f"\nAvg R winner: {avg_r_winner}"
+                        f"\nAvg R loser: {avg_r_loser}"
+                        f"\nAvg R for strategy: {avg_r_strategy}"
+                        f"\nExpectancy $: {expectancy_qty} {self.currency} | Ratio: {expectancy_ratio}"
+                        f"\nStd. dev: {std_dev}"
+                        f"\nSharpe: {sharpe}"
+                        f"\nSortino: {sortino}"
+                        f"\nExpected return: {exp_return}&"
+                        f"\n--------------------------------------------------------------------------------"
+                    )
 
         return output
 
@@ -554,5 +665,5 @@ class TestPortfolio():
             f"\nUse kelly criterion for sizing when available: {self.use_kelly}"
             f"\nMax risk per trade when not using a kelly fraction: {self.max_risk_per_trade_percentage}%"
             f"\nTarget instruments: {self.assets}"
-            f"\nAllocations: {json.dumps(self.allocations, indent=2)}"
+            f"\nAsset class and strategy allocations: {json.dumps(self.allocations, indent=2)}"
         )
