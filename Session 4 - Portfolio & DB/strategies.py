@@ -59,7 +59,9 @@ class EMACross50200:
                 'direction': data['Cross'],
                 'entry': data['Close'],
                 'stop': stop,
-                'targets': []   # No defined targets for this strategy, uses an exit signal.
+                # Must be a list of tuples or empty list
+                # Format: [(target 1, percentage to close), (target 2, percentage to close), (..), ..]
+                'targets': []
             }
 
         return signal
