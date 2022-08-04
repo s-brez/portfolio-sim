@@ -1,9 +1,9 @@
 import pandas as pd
 
 
-class EMACross25100:
+class EMACross1020:
 
-    name = "EMACross25100"
+    name = "EMACross1020"
     timeframe = "1d"
 
     # flip_on_signalled_exit = True
@@ -11,12 +11,12 @@ class EMACross25100:
     p_win = {}     # p_win[symbol][timeframe] = float
     avg_r = {}     # avg_r[symbol][timeframe] = float
 
-    def feature_data(data: pd.DataFrame, slow=100, fast=25) -> [pd.Series]:
+    def feature_data(data: pd.DataFrame, slow=20, fast=10) -> [pd.Series]:
         """
         Use a third "cross" column for if-or-not a cross occurred on that row.
         """
-        slow_ema = data['Close'].ewm(span=slow, adjust=False).mean().rename('EMA100')
-        fast_ema = data['Close'].ewm(span=fast, adjust=False).mean().rename('EMA25')
+        slow_ema = data['Close'].ewm(span=slow, adjust=False).mean().rename('EMA20')
+        fast_ema = data['Close'].ewm(span=fast, adjust=False).mean().rename('EMA10')
         cross = pd.Series(None, index=data.index).rename("Cross")
 
         # Populate cross column.
@@ -25,10 +25,10 @@ class EMACross25100:
         temp_df = pd.concat([fast_ema, slow_ema], axis=1)
         for index in range(0, temp_df.shape[0]):
             if index > 0:
-                prev_slow = temp_df.iloc[index - 1]["EMA100"]
-                prev_fast = temp_df.iloc[index - 1]["EMA25"]
-                curr_slow = temp_df.iloc[index]["EMA100"]
-                curr_fast = temp_df.iloc[index]["EMA25"]
+                prev_slow = temp_df.iloc[index - 1]["EMA20"]
+                prev_fast = temp_df.iloc[index - 1]["EMA10"]
+                curr_slow = temp_df.iloc[index]["EMA20"]
+                curr_fast = temp_df.iloc[index]["EMA10"]
 
                 # Buy side check (fast crosses above slow)
                 if (prev_slow > prev_fast) and (curr_fast > curr_slow):
@@ -38,7 +38,7 @@ class EMACross25100:
                 elif (prev_slow < prev_fast) and (curr_fast < curr_slow):
                     cross.iloc[index] = "SELL"
 
-        return [("25EMA", fast_ema), ("100EMA", slow_ema), ("Cross", cross)]
+        return [("10EMA", fast_ema), ("20EMA", slow_ema), ("Cross", cross)]
 
     def check_for_signal(data: pd.Series) -> dict:
         """
@@ -65,44 +65,3 @@ class EMACross25100:
             }
 
         return signal
-
-
-class MeanReversion:
-
-    name = "MeanReversion"
-    timeframe = "1d"
-    p_win = {}  # p_win[symbol][timeframe]
-
-    def feature_data(data: pd.DataFrame, ) -> [pd.Series]:
-        pass
-
-    def check_for_signal():
-        pass
-
-
-class EMACross1020:
-
-    name = "EMACross1020"
-    timeframe = "1d"
-    p_win = {}  # p_win[symbol][timeframe]
-
-    def feature_data(data: pd.DataFrame, slow=20, fast=10) -> [pd.Series]:
-        return [
-            ("10EMA", data['Close'].ewm(span=fast, adjust=False).mean()),
-            ("20EMA", data['Close'].ewm(span=slow, adjust=False).mean())]
-
-    def check_for_signal(data: pd.Series) -> dict:
-        pass
-
-
-class BBSimple:
-
-    name = "BBSimple"
-    timeframe = "1d"
-    p_win = {}  # p_win[symbol][timeframe]
-
-    def feature_data(data: pd.DataFrame, ) -> [pd.Series]:
-        pass
-
-    def check_for_signal():
-        pass
