@@ -229,6 +229,7 @@ class Backtester:
             - Trades measured and executed in $ units, lot sizing  not supported.
             - Open pnl not tracked, only realised pnl.
             - Assumes stops are filled at their trigger price.
+            - Assumes normal distribution of returns when calculating Sharpe ration.
         """
 
         strategies = [s['object'] for s in self.portfolio.strategies.values()]
@@ -291,5 +292,5 @@ class Backtester:
         # Add mean reversion strategy
         # DB integration
 
-        self.portfolio.metrics(display=False)
+        self.portfolio.post_simulation_analysis()
         print("Simulation complete.")
