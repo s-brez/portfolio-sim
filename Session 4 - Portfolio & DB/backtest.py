@@ -221,6 +221,7 @@ class Backtester:
                 process 1 1d bar; the timestamp of every sixth 4h must match the next 1d.
             - Features requiring analysis of > 1 unit periods must have outputs condensed into a single unit.
                 see EmaCross50200 for example using Cross column.
+            - Allocations can be made per asset class, per strategy, but not per asset.
             - Detection of resting order triggers not implemented (only stop loss orders), so the system is reliant
               on discrete BUY/SELL signals. by nature of this, trades cannot be risk-free until they are fully closed,
               so compounding already open positions of the same symbol is not supported.
