@@ -1,9 +1,9 @@
 import pandas as pd
 
 
-class EMACross50200:
+class EMACross25100:
 
-    name = "EMACross50200"
+    name = "EMACross25100"
     timeframe = "1d"
 
     # flip_on_signalled_exit = True
@@ -11,12 +11,12 @@ class EMACross50200:
     p_win = {}     # p_win[symbol][timeframe] = float
     avg_r = {}     # avg_r[symbol][timeframe] = float
 
-    def feature_data(data: pd.DataFrame, slow=200, fast=50) -> [pd.Series]:
+    def feature_data(data: pd.DataFrame, slow=100, fast=25) -> [pd.Series]:
         """
         Use a third "cross" column for if-or-not a cross occurred on that row.
         """
-        slow_ema = data['Close'].ewm(span=slow, adjust=False).mean().rename('EMA200')
-        fast_ema = data['Close'].ewm(span=fast, adjust=False).mean().rename('EMA50')
+        slow_ema = data['Close'].ewm(span=slow, adjust=False).mean().rename('EMA100')
+        fast_ema = data['Close'].ewm(span=fast, adjust=False).mean().rename('EMA25')
         cross = pd.Series(None, index=data.index).rename("Cross")
 
         # Populate cross column.
@@ -25,10 +25,10 @@ class EMACross50200:
         temp_df = pd.concat([fast_ema, slow_ema], axis=1)
         for index in range(0, temp_df.shape[0]):
             if index > 0:
-                prev_slow = temp_df.iloc[index - 1]["EMA200"]
-                prev_fast = temp_df.iloc[index - 1]["EMA50"]
-                curr_slow = temp_df.iloc[index]["EMA200"]
-                curr_fast = temp_df.iloc[index]["EMA50"]
+                prev_slow = temp_df.iloc[index - 1]["EMA100"]
+                prev_fast = temp_df.iloc[index - 1]["EMA25"]
+                curr_slow = temp_df.iloc[index]["EMA100"]
+                curr_fast = temp_df.iloc[index]["EMA25"]
 
                 # Buy side check (fast crosses above slow)
                 if (prev_slow > prev_fast) and (curr_fast > curr_slow):
@@ -38,7 +38,7 @@ class EMACross50200:
                 elif (prev_slow < prev_fast) and (curr_fast < curr_slow):
                     cross.iloc[index] = "SELL"
 
-        return [("50EMA", fast_ema), ("200EMA", slow_ema), ("Cross", cross)]
+        return [("25EMA", fast_ema), ("100EMA", slow_ema), ("Cross", cross)]
 
     def check_for_signal(data: pd.Series) -> dict:
         """
