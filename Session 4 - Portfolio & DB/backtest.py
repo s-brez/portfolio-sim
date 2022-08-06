@@ -209,7 +209,7 @@ class Backtester:
                 # Add logging for non-actionable signals here if required in future.
                 pass
 
-    def start(self, start_timestamp=None, finish_timestamp=None):
+    def start(self, start_timestamp=None, finish_timestamp=None, save=True):
         """
         IMPORTANT: For this to work all dataframes must be synchronised by date, i.e have a
         continuous date index, no missing timestamps, start and finish on same timestamps.
@@ -229,7 +229,7 @@ class Backtester:
             - Trades measured and executed in $ units, lot sizing  not supported.
             - Open pnl not tracked, only realised pnl.
             - Assumes stops are filled at their trigger price.
-            - Assumes normal distribution of returns when calculating Sharpe ration.
+            - Assumes normal distribution of returns when calculating Sharpe ratio.
         """
 
         strategies = [s['object'] for s in self.portfolio.strategies.values()]
@@ -286,11 +286,12 @@ class Backtester:
                             signal['timeframe'] = strategy.timeframe
                             signal['strategy'] = strategy.name
                             self.process_signal(signal)
+        # TODO:
+        # DB integration.
+        # Setup kelly with p_win values.
+        # 2nd test strategy.
+        # Restructure portfolio to have a parent abstract class for static methods.
+        # Position flip on exit signal.
 
-        # TODO: implement position flip on exit signal.
-        # Finish portfolio stuff
-        # Add mean reversion strategy
-        # DB integration
-
-        self.portfolio.post_simulation_analysis()
+        self.portfolio.post_simulation_analysis(save)
         print("Simulation complete.")
