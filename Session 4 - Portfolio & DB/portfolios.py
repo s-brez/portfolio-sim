@@ -1,9 +1,10 @@
 from dateutil.relativedelta import relativedelta
 from datetime import datetime, timedelta
+from statistics import pstdev, stdev, mean
 import pandas as pd
 import json
 
-from strategies import EMACross50200
+from strategies import EMACross1020
 
 
 class TestPortfolio():
@@ -36,6 +37,10 @@ class TestPortfolio():
         self.max_risk_per_trade_percentage = 2.5    # max loss per trade, when not using kelly fraction.
         self.risk_free_rate = 3.04                  # US treasury bill 12 month yeild as at 03/08/22.
 
+        # R multiple used to calculate target delta for trades without specified targets.
+        # E.g. Value of 3 means 3x the distance from entry to stop is used as target distance.
+        self.default_target_distance_r = 3
+
         self.total_fees = 0
         self.gross_profit = 0
         self.gross_loss = 0
@@ -55,10 +60,21 @@ class TestPortfolio():
 
         self.assets_flattened = [i for j in self.assets.values() for i in j]
 
+        # Invert asset dict for ease of mapping symbol : asset class
+        self.assets_inverted = {}
+        for key, value in self.assets.items():
+            for string in value:
+                self.assets_inverted.setdefault(string, key)
+
         self.strategies = {
-            "EMACross50200": {
-                "object": EMACross50200,
-                "trades": {symbol: {} for symbol in self.assets_flattened},  # trades[symbol][timeframe] = [{trade, ..}]
+            "EMACross1020": {
+                "object": EMACross1020,
+                "trades": {symbol: {} for symbol in self.assets_flattened},             # trades[symbol][timeframe] = [{trade, ..}]
+                "metrics_per_asset": {symbol: {} for symbol in self.assets_flattened},  # metrics[symbol][timeframe] = {stats}
+                "metrics_strategy": {
+                    "exp_return": 0,
+                    "std_dev": 0
+                }
             }
         }
 
@@ -70,7 +86,7 @@ class TestPortfolio():
             "EQUITIES": {
                 "allocation": 20,
                 "strategy_allocations": {
-                    EMACross50200.name: {
+                    EMACross1020.name: {
                         "allocation": 100,
                         "in_use": 0
                     }
@@ -79,7 +95,7 @@ class TestPortfolio():
             "CURRENCIES": {
                 "allocation": 20,
                 "strategy_allocations": {
-                    EMACross50200.name: {
+                    EMACross1020.name: {
                         "allocation": 100,
                         "in_use": 0
                     }
@@ -88,7 +104,7 @@ class TestPortfolio():
             "COMMODITIES": {
                 "allocation": 20,
                 "strategy_allocations": {
-                    EMACross50200.name: {
+                    EMACross1020.name: {
                         "allocation": 100,
                         "in_use": 0
                     }
@@ -97,7 +113,7 @@ class TestPortfolio():
             "INDICES": {
                 "allocation": 20,
                 "strategy_allocations": {
-                    EMACross50200.name: {
+                    EMACross1020.name: {
                         "allocation": 100,
                         "in_use": 0
                     }
@@ -106,7 +122,7 @@ class TestPortfolio():
             "CRYPTO": {
                 "allocation": 20,
                 "strategy_allocations": {
-                    EMACross50200.name: {
+                    EMACross1020.name: {
                         "allocation": 100,
                         "in_use": 0
                     }
@@ -324,19 +340,34 @@ class TestPortfolio():
         """
 
         position = self.positions[signal['symbol']][signal['strategy']]
+        stop_price = position['stop']
         entry = position['entry']
         exit = signal['entry'] if not stop else stop['price']
         fees = position['fees'] * 2  # entry and exit
 
         delta = abs((entry - exit) / entry) * 100
+        stop_delta = abs((entry - stop_price) / entry) * 100
         pnl = abs((position['size'] / 100) * delta) - fees
-
-        self.total_fees += fees
 
         if position['direction'] == "BUY":
             net_pnl = pnl if exit > entry else -pnl
         else:
             net_pnl = pnl if exit < entry else -pnl
+
+        # If trade profitable, target_delta = delta
+        if net_pnl > 0:
+            target_delta = delta
+        else:
+            # If not profitable, target_delta = default R distance multiple from entry, if no specified targets.
+            if len(position['targets']) > 0:
+                target = position['targets'][-1][0]  # Final take profit target (see strategies.py)
+                target_delta = abs((entry - target) / entry) * 100
+            else:
+                if position['direction'] == "BUY":
+                    target = (entry / 100) * (100 + (self.default_target_distance_r * stop_delta))
+                else:
+                    target = (entry / 100) * (100 - (self.default_target_distance_r * stop_delta))
+                target_delta = abs((entry - target) / entry) * 100
 
         if net_pnl > 0:
             self.total_winners += 1
@@ -344,6 +375,8 @@ class TestPortfolio():
         else:
             self.total_losers += 1
             self.gross_loss += abs((position['size'] / 100) * delta)
+
+        self.total_fees += fees
 
         self.current_equity += net_pnl
 
@@ -359,8 +392,8 @@ class TestPortfolio():
             "entry": entry,
             "exit": exit,
             "delta": delta,
-            "stop_delta": 0,
-            "target_delta": 0,
+            "stop_delta": stop_delta,
+            "target_delta": target_delta,
             "stop": position['stop'],
             "size": position["size"],
             "fees": fees,
@@ -382,19 +415,33 @@ class TestPortfolio():
         if position:
 
             entry = position['entry']
+            stop = position['stop']
             exit = price
             fees = position['fees']  # entry fee only as posiition is still open
 
-            # If trade profitable, target_delta = delta
-            # if trade not profitable, target = specified target, or default R distance multiple from entry.
-
             delta = abs((entry - exit) / entry) * 100
+            stop_delta = abs((entry - stop) / entry) * 100
             pnl = abs((position['size'] / 100) * delta) - fees
 
             if position['direction'] == "BUY":
                 net_pnl = pnl if exit > entry else -pnl
             else:
                 net_pnl = pnl if exit < entry else -pnl
+
+            # If trade profitable, target_delta = delta
+            if net_pnl > 0:
+                target_delta = delta
+            else:
+                # If not profitable, target_delta = default R distance multiple from entry, if no specified targets.
+                if len(position['targets']) > 0:
+                    target = position['targets'][-1][0]  # Final take profit target (see strategies.py)
+                    target_delta = abs((entry - target) / entry) * 100
+                else:
+                    if position['direction'] == "BUY":
+                        target = (entry / 100) * (100 + (self.default_target_distance_r * stop_delta))
+                    else:
+                        target = (entry / 100) * (100 - (self.default_target_distance_r * stop_delta))
+                    target_delta = abs((entry - target) / entry) * 100
 
             if net_pnl > 0:
                 self.total_winners += 1
@@ -424,8 +471,8 @@ class TestPortfolio():
                 "entry": entry,
                 "exit": exit,
                 "delta": delta,
-                "stop_delta": 0,
-                "target_delta": 0,
+                "stop_delta": stop_delta,
+                "target_delta": target_delta,
                 "stop": position['stop'],
                 "size": position["size"],
                 "fees": fees,
@@ -444,11 +491,14 @@ class TestPortfolio():
         largest_winner, largest_loser = 0, 0
         avg_size_winner, avg_size_loser, avg_size = 0, 0, 0
         avg_r_winner, avg_r_loser, r_portfolio = 0, 0, 0
-        exp_return, std_dev, sharpe, sortino = 0, 0, 0, 0
+        exp_return, std_dev_returns, sharpe, sortino = 0, 0, 0, 0
         avg_hold_time, avg_hold_time_loser, avg_hold_time_winner = timedelta(), timedelta(), timedelta()
+        returns, downside_returns = [], []
 
         # Iterate trade records once, tally everything required, then run final calculations.
         for index, trade in enumerate(self.trade_history):
+
+            capital_allocation = self.start_equity * (self.allocations[self.assets_inverted[trade['symbol']]]["allocation"] / 100)
 
             abs_r = abs(trade['entry'] - trade['exit']) / abs(trade['entry'] - trade['stop'])
             r = abs_r if trade['net_pnl'] > 0 else -abs_r
@@ -471,6 +521,7 @@ class TestPortfolio():
                 avg_size_winner += trade['size']
                 avg_r_winner += r
                 avg_hold_time_winner += hold_time
+                returns.append(round((trade['net_pnl'] / capital_allocation) * 100, 2))
                 if trade['size'] > largest_winner:
                     largest_winner = trade['size']
 
@@ -478,6 +529,7 @@ class TestPortfolio():
                 avg_r_loser += r
                 avg_size_loser += trade['size']
                 avg_hold_time_loser += hold_time
+                downside_returns.append(round((trade['net_pnl'] / capital_allocation) * 100, 2))
                 if trade['size'] > largest_loser:
                     largest_loser = trade['size']
 
@@ -489,15 +541,23 @@ class TestPortfolio():
         r_portfolio = round(avg_size_winner / avg_size_loser, 2)
         p_win = round(self.total_winners / (self.position_count + self.total_trades), 5)
         win_loss = self.total_winners / self.total_losers
-        expectancy_qty = round((p_win * avg_size_winner) - ((1 - p_win) * avg_size_loser), 2)
-        expectancy_ratio = round((r_portfolio * p_win) - (1 - p_win), 5)
+        expectancy = round((p_win * avg_size_winner) - ((1 - p_win) * avg_size_loser), 2)
         avg_hold_time = avg_hold_time / self.total_trades
         avg_hold_time_winner = avg_hold_time_winner / self.total_winners
         avg_hold_time_loser = avg_hold_time_loser / self.total_losers
 
-        exp_return = 0  # exp return of each strategy * weighting of strategy
-        sharpe = 0
-        sortino = 0
+        if p_win > 0:
+            for trade in self.trade_history:
+                # (% gained for win * p_win) + (% lost for loss * p_loss) + ..
+                exp_return += ((trade['target_delta'] * p_win) + (trade['stop_delta'] * (1 - p_win)))
+
+        exp_return = round(exp_return / self.total_trades, 2)
+
+        avg_return = round(mean(returns), 2)
+        std_dev_returns = round(pstdev(returns), 2)
+        std_dev_downside_returns = round(pstdev(downside_returns), 2)
+        sharpe = round((avg_return - self.risk_free_rate) / std_dev_returns, 3)
+        sortino = round((avg_return - self.risk_free_rate) / std_dev_downside_returns, 3)
 
         if display:
             output = (
@@ -507,7 +567,7 @@ class TestPortfolio():
                 f"\nRealised equity: {round(self.current_equity, 2)} {self.currency}"
                 f"\nOpen equity: {round(self.open_equity, 2)} {self.currency}"
                 f"\nFinal equity: {round(final_equity, 2)} {self.currency}"
-                f"\nROI: {round(abs((self.start_equity - final_equity) / self.start_equity) * 100, 2)}%"
+                f"\nReturn: {round(abs((self.start_equity - final_equity) / self.start_equity) * 100, 2)}%"
                 f"\n--------------------------------------------------------------------------------"
                 f"\nHigh-water mark: {round(self.high_watermark, 2)} {self.currency}"
                 f"\nDrawdown-water mark: {round(self.drawdown_watermark, 2)} {self.currency}"
@@ -526,8 +586,8 @@ class TestPortfolio():
                 f"\nLosing trades: {self.total_losers}"
                 f"\nWin/loss: {round(win_loss, 2)}"
                 f"\nP_win: {p_win}"
-                f"\nExpectancy ($): {expectancy_qty} {self.currency}"
-                f"\nExpectancy ratio: {expectancy_ratio}"
+                f"\nExpectancy ($): {expectancy} {self.currency}"
+                f"\nPortfolio expected return: {exp_return}%"
                 f"\n--------------------------------------------------------------------------------"
                 f"\nLargest winning position: {round(largest_winner, 2)} {self.currency}"
                 f"\nLargest losing position: {round(largest_loser, 2)} {self.currency}"
@@ -538,10 +598,9 @@ class TestPortfolio():
                 f"\nAvg R loser: {avg_r_loser}"
                 f"\nAvg R portfolio: {r_portfolio}"
                 f"\n--------------------------------------------------------------------------------"
-                f"\nPortfolio std. dev: {std_dev}"
-                f"\nPortfolio Sharpe: {sharpe}"
-                f"\nPortfolio Sortino: {sortino}"
-                f"\nPortfolio expected return: {exp_return}"
+                f"\nStd dev. returns: {std_dev_returns}%"
+                f"\nSharpe: {sharpe}"
+                f"\nSortino: {sortino}"
                 f"\n--------------------------------------------------------------------------------"
             )
         else:
@@ -549,11 +608,6 @@ class TestPortfolio():
 
         return output
 
-    # self.strategies = {
-    #     "EMACross50200": {
-    #         "object": EMACross50200,
-    #         "trades":  trades[symbol][timeframe] = [{trade, ..}]
-    # }
     def strategy_metrics(self, display=True) -> str:
 
         output = ""
@@ -561,12 +615,15 @@ class TestPortfolio():
             for symbol in strategy['trades'].keys():
                 for timeframe in self.strategies[strategy['object'].name]['trades'][symbol].keys():
 
+                    capital_allocation = self.start_equity * (self.allocations[self.assets_inverted[symbol]]["allocation"] / 100)
+
                     pnl, total_trades, winners, losers, win_loss, p_win = 0, 0, 0, 0, 0, 0
                     avg_size, avg_size_winner, avg_size_loser = 0, 0, 0
                     avg_r_winner, avg_r_loser, avg_r_strategy = 0, 0, 0
-                    expectancy_qty, expectancy_ratio = 0, 0
-                    exp_return, sharpe, sortino, std_dev = 0, 0, 0, 0
+                    expectancy, std_dev_returns, std_dev_downside_returns = 0, 0, 0
+                    exp_return, sharpe, sortino = 0, 0, 0
                     avg_hold_time = timedelta()
+                    returns, downside_returns = [], []
 
                     for index, trade in enumerate(self.strategies[strategy['object'].name]['trades'][symbol][timeframe]):
 
@@ -575,6 +632,8 @@ class TestPortfolio():
                         avg_r_strategy += trade['r']
                         total_trades += 1
                         pnl += trade['net_pnl']
+
+                        returns.append(round((pnl / capital_allocation) * 100, 2))
 
                         if trade['net_pnl'] > 0:
                             winners += 1
@@ -585,6 +644,7 @@ class TestPortfolio():
                             losers += 1
                             avg_size_loser += trade['size']
                             avg_r_loser += trade['r']
+                            downside_returns.append(round((pnl / capital_allocation) * 100, 2))
 
                     # Handle zero division where no wins/loses for a particular strategy/asset/timeframe.
                     if losers == 0 and winners > 0:
@@ -602,53 +662,59 @@ class TestPortfolio():
                         avg_size_winner = round(avg_size_winner / winners, 2)
                         avg_r_winner = round(avg_r_winner / winners, 2)
                         p_win = round(winners / total_trades, 5)
-                        expectancy_ratio = round((avg_r_strategy * p_win) - (1 - p_win), 5)
-                    else:
-                        expectancy_ratio = "N/A"
 
                     if losers > 0:
                         avg_size_loser = round(avg_size_loser / losers, 2)
                         avg_r_loser = round(avg_r_loser / losers, 2)
 
                     if winners > 0 and losers > 0:
-                        expectancy_qty = round((p_win * avg_size_winner) - ((1 - p_win) * avg_size_loser), 2)
-                    else:
-                        expectancy_qty = "N/A"
+                        expectancy = round((p_win * avg_size_winner) - ((1 - p_win) * avg_size_loser), 2)
 
                     if p_win > 0:
                         for trade in self.strategies[strategy['object'].name]['trades'][symbol][timeframe]:
                             # (% gained for win * p_win) + (% lost for loss * p_loss) + ..
-                            exp_return += (trade['target_delta'] * p_win) + (trade['stop_delta'] * (1 - p_win))
-                        exp_return = round(exp_return, 2)
-                    else:
-                        exp_return = "N/A"
+                            exp_return += ((trade['target_delta'] * p_win) + (trade['stop_delta'] * (1 - p_win)))
+                        exp_return = round(exp_return / total_trades, 2)
 
-                    sharpe, sortino, std_dev = 0, 0, 0
+                    avg_return = round(mean(returns), 2)
+                    std_dev_returns = round(pstdev(returns), 2)
+                    std_dev_downside_returns = round(pstdev(downside_returns), 2)
+                    sharpe = round((avg_return - self.risk_free_rate) / std_dev_returns, 3)
+                    sortino = round((avg_return - self.risk_free_rate) / std_dev_downside_returns, 3)
 
-                    output += (
-                        f"\n{strategy['object'].name} {symbol} {timeframe}: "
-                        f"\nNet profit: {pnl} {self.currency}"
-                        f"\nWinners: {winners} | Losers: {losers}"
-                        f"\nWin/loss: {round(win_loss, 2)}"
-                        f"\nP_win: {p_win}"
-                        f"\nAvg size winning position: {avg_size_winner} {self.currency}"
-                        f"\nAvg size losing position: {avg_size_loser} {self.currency}"
-                        f"\nAvg position size: {avg_size} {self.currency}"
-                        f"\nAvg R winner: {avg_r_winner}"
-                        f"\nAvg R loser: {avg_r_loser}"
-                        f"\nAvg R for strategy: {avg_r_strategy}"
-                        f"\nExpectancy $: {expectancy_qty} {self.currency} | Ratio: {expectancy_ratio}"
-                        f"\nStd. dev: {std_dev}"
-                        f"\nSharpe: {sharpe}"
-                        f"\nSortino: {sortino}"
-                        f"\nExpected return: {exp_return}&"
-                        f"\n--------------------------------------------------------------------------------"
-                    )
+                    # Save.
+
+                    if display:
+                        output += (
+                            f"\n{strategy['object'].name} {symbol} {timeframe}: "
+                            f"\nReturn: {avg_return}%"
+                            f"\nNet profit: {pnl} {self.currency}"
+                            f"\nWinners: {winners} | Losers: {losers}"
+                            f"\nWin/loss: {round(win_loss, 2)}"
+                            f"\nP_win: {p_win}"
+                            f"\nAvg size winning position: {avg_size_winner} {self.currency}"
+                            f"\nAvg size losing position: {avg_size_loser} {self.currency}"
+                            f"\nAvg position size: {avg_size} {self.currency}"
+                            f"\nAvg R winner: {avg_r_winner}"
+                            f"\nAvg R loser: {avg_r_loser}"
+                            f"\nAvg R for strategy: {avg_r_strategy}"
+                            f"\nAvg expected return: {exp_return}%  <-- (?)"
+                            f"\nExpectancy ($): {expectancy} {self.currency}"
+                            f"\nStd dev. returns: {std_dev_returns}%"
+                            f"\nSharpe: {sharpe}"
+                            f"\nSortino: {sortino}"
+                            f"\n--------------------------------------------------------------------------------"
+                        )
 
         return output
 
     def equity_curve(self) -> None:
         pass
+
+    def post_simulation_analysis(self) -> None:
+        self.metrics(display=False)             # 1. get baseline per-trade stats
+        self.strategy_metrics(display=False)    # 2. derive indidivudal metrics from base stats
+        self.metrics(display=False)             # 3. do portfolio calcs requiring indidividual stats
 
     def parameter_summary(self) -> str:
         return (
@@ -665,5 +731,4 @@ class TestPortfolio():
             f"\nUse kelly criterion for sizing when available: {self.use_kelly}"
             f"\nMax risk per trade when not using a kelly fraction: {self.max_risk_per_trade_percentage}%"
             f"\nTarget instruments: {self.assets}"
-            f"\nAsset class and strategy allocations: {json.dumps(self.allocations, indent=2)}"
         )
