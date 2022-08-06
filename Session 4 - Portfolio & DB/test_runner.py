@@ -33,9 +33,13 @@ while(True):
         print(bt.portfolio.parameter_summary())
 
     elif option == 2:
+
+        # Extend this by returning a list, which can then be sorted by return, sharpe etc
         print(bt.portfolio.metrics())
 
     elif option == 3:
+
+        # Extend this by returning a list, which can then be sorted by return, sharpe etc
         print(bt.portfolio.strategy_metrics())
 
     elif option == 4:
