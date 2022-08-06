@@ -1,4 +1,6 @@
 *.pyc
 *.csv
+*.json
 **/*.pyc
 **/*.csv
+**/*.json
