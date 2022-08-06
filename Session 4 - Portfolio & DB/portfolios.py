@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from statistics import pstdev, stdev, mean
 import pandas as pd
 import json
+import os
 
 from strategies import EMACross1020
 
@@ -19,6 +20,7 @@ class TestPortfolio():
         self.open_equity = 0
         self.trade_history = []                     # [{tx pnl data}, ..]
 
+        self.report = None
         self.positions = {}                         # positions[symbol][strategy] ..
         self.position_count = 0
         self.total_trades = 0
@@ -69,12 +71,8 @@ class TestPortfolio():
         self.strategies = {
             "EMACross1020": {
                 "object": EMACross1020,
-                "trades": {symbol: {} for symbol in self.assets_flattened},             # trades[symbol][timeframe] = [{trade, ..}]
-                "metrics_per_asset": {symbol: {} for symbol in self.assets_flattened},  # metrics[symbol][timeframe] = {stats}
-                "metrics_strategy": {
-                    "exp_return": 0,
-                    "std_dev": 0
-                }
+                "trades": {symbol: {} for symbol in self.assets_flattened},     # trades[symbol][timeframe] = [{trade, ..}]
+                "metrics": {symbol: {} for symbol in self.assets_flattened},    # metrics[symbol][timeframe] = {stats json}
             }
         }
 
@@ -510,6 +508,8 @@ class TestPortfolio():
             avg_size += trade['size']
             avg_hold_time += hold_time
 
+            returns.append(round((trade['net_pnl'] / capital_allocation) * 100, 2))
+
             # Group trades by symbol and timeframe under each strategy.
             try:
                 self.strategies[trade['strategy']]['trades'][trade['symbol']][trade['timeframe']].append(trade)
@@ -521,7 +521,6 @@ class TestPortfolio():
                 avg_size_winner += trade['size']
                 avg_r_winner += r
                 avg_hold_time_winner += hold_time
-                returns.append(round((trade['net_pnl'] / capital_allocation) * 100, 2))
                 if trade['size'] > largest_winner:
                     largest_winner = trade['size']
 
@@ -559,6 +558,22 @@ class TestPortfolio():
         sharpe = round((avg_return - self.risk_free_rate) / std_dev_returns, 3)
         sortino = round((avg_return - self.risk_free_rate) / std_dev_downside_returns, 3)
 
+        self.report = {
+            "return": abs((self.start_equity - final_equity) / self.start_equity) * 100,
+            "avg_return": avg_return, "start_equity": self.start_equity, "final_equity": final_equity,
+            "high_watermark": self.high_watermark, "drawdown_watermark": self.drawdown_watermark,
+            "fees_paid": self.total_fees, "gross_profit": self.gross_profit, "gross_loss": self.gross_loss, "net_pnl": self.gross_profit - self.gross_loss - self.total_fees,
+            "avg_hold_time": avg_hold_time, "avg_hold_time_winner": avg_hold_time_winner, "avg_hold_time_loser": avg_hold_time_loser,
+            "open_trades": self.position_count, "closed_trades": self.total_trades,
+            "winners": self.total_winners, "losers": self.total_losers, "win_loss": win_loss, "p_win": p_win,
+            "avg_size": avg_size, "avg_size_winner": avg_size_winner, "avg_size_loser": avg_size_loser,
+            "avg_r": r_portfolio, "avg_r_winner": avg_r_winner, "avg_r_winner": avg_r_loser,
+            "expectancy": expectancy, "exp_return": exp_return,
+            "std_dev_returns": std_dev_returns, "std_dev_downside_returns": std_dev_downside_returns,
+            "sharpe": sharpe, "sortino": sortino,
+
+        }
+
         if display:
             output = (
                 f"{self.parameter_summary()}"
@@ -568,6 +583,7 @@ class TestPortfolio():
                 f"\nOpen equity: {round(self.open_equity, 2)} {self.currency}"
                 f"\nFinal equity: {round(final_equity, 2)} {self.currency}"
                 f"\nReturn: {round(abs((self.start_equity - final_equity) / self.start_equity) * 100, 2)}%"
+                f"\nAvg return: {avg_return}%"
                 f"\n--------------------------------------------------------------------------------"
                 f"\nHigh-water mark: {round(self.high_watermark, 2)} {self.currency}"
                 f"\nDrawdown-water mark: {round(self.drawdown_watermark, 2)} {self.currency}"
@@ -587,7 +603,7 @@ class TestPortfolio():
                 f"\nWin/loss: {round(win_loss, 2)}"
                 f"\nP_win: {p_win}"
                 f"\nExpectancy ($): {expectancy} {self.currency}"
-                f"\nPortfolio expected return: {exp_return}%"
+                f"\nExpected return: {exp_return}%"
                 f"\n--------------------------------------------------------------------------------"
                 f"\nLargest winning position: {round(largest_winner, 2)} {self.currency}"
                 f"\nLargest losing position: {round(largest_loser, 2)} {self.currency}"
@@ -682,7 +698,16 @@ class TestPortfolio():
                     sharpe = round((avg_return - self.risk_free_rate) / std_dev_returns, 3)
                     sortino = round((avg_return - self.risk_free_rate) / std_dev_downside_returns, 3)
 
-                    # Save.
+                    self.strategies[strategy['object'].name]['metrics'][symbol][timeframe] = {
+                        "return": avg_return, "net_pnl": pnl,
+                        "winners": winners, "losers": losers, "win_loss": win_loss, "p_win": p_win,
+                        "avg_size": avg_size, "avg_size_winner": avg_size_winner, "avg_size_loser": avg_size_loser,
+                        "avg_r": avg_r_strategy, "avg_r_winner": avg_r_winner, "avg_r_winner": avg_r_loser,
+                        "expectancy": expectancy, "exp_return": exp_return,
+                        "std_dev_returns": std_dev_returns, "std_dev_downside_returns": std_dev_downside_returns,
+                        "sharpe": sharpe, "sortino": sortino,
+
+                    }
 
                     if display:
                         output += (
@@ -698,7 +723,7 @@ class TestPortfolio():
                             f"\nAvg R winner: {avg_r_winner}"
                             f"\nAvg R loser: {avg_r_loser}"
                             f"\nAvg R for strategy: {avg_r_strategy}"
-                            f"\nAvg expected return: {exp_return}%  <-- (?)"
+                            f"\nExpected return: {exp_return}%  <-- (?)"
                             f"\nExpectancy ($): {expectancy} {self.currency}"
                             f"\nStd dev. returns: {std_dev_returns}%"
                             f"\nSharpe: {sharpe}"
@@ -715,6 +740,35 @@ class TestPortfolio():
         self.metrics(display=False)             # 1. get baseline per-trade stats
         self.strategy_metrics(display=False)    # 2. derive indidivudal metrics from base stats
         self.metrics(display=False)             # 3. do portfolio calcs requiring indidividual stats
+        self.save_results_to_file()
+
+    def save_results_to_file(self) -> None:
+        if not os.path.exists('results'):
+            os.makedirs('results')
+
+        timestamp = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+        path = f"{self.name}_{timestamp}/".replace(" ", "_")
+        os.makedirs("results/" + path)
+
+        output = json.dumps(self.report, default=str)
+        with open("results/" + path + "portfolio_performance.json", "w", encoding="utf-8") as file:
+            json.dump(output, file, ensure_ascii=False, indent=2)
+
+        output = json.dumps([{s[0]: s[1]['metrics']} for s in self.strategies.items()], default=str)
+        with open("results/" + path + "strategy_performance.json", "w", encoding="utf-8") as file:
+            json.dump(output, file, ensure_ascii=False, indent=2)
+
+        output = json.dumps(self.trade_history, default=str)
+        with open("results/" + path + "trades.json", "w", encoding="utf-8") as file:
+            json.dump(output, file, ensure_ascii=False, indent=2)
+
+        output = json.dumps(self.positions, default=str)
+        with open("results/" + path + "positions.json", "w", encoding="utf-8") as file:
+            json.dump(output, file, ensure_ascii=False, indent=2)
+
+        output = json.dumps(self.transaction_history, default=str)
+        with open("results/" + path + "transactions.json", "w", encoding="utf-8") as file:
+            json.dump(output, file, ensure_ascii=False, indent=2)
 
     def parameter_summary(self) -> str:
         return (
