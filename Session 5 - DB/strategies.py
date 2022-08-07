@@ -9,7 +9,7 @@ class EMACross1020:
     # flip_on_signalled_exit = True
 
     p_win = {}     # p_win[symbol][timeframe] = float
-    avg_r = {}     # avg_r[symbol][timeframe] = float
+    avg_r = {}     # avg_r[symbol][timeframe][kelly/flat] = float
 
     def feature_data(data: pd.DataFrame, slow=20, fast=10) -> [pd.Series]:
         """
