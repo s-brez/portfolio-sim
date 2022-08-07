@@ -235,15 +235,15 @@ def correlation_matrix(root: dict, symbols: list, timeframe: str) -> pd.DataFram
 
 
 # Note: Run this once to fetch data initially. Use local data thereon.
-# for symbol in SYMBOLS:
+for symbol in SYMBOLS:
 
     # # 7 years, daily resolution
-    # fetch_historical_data(symbol, "1d", 7, save=True)
+    fetch_historical_data(symbol, "1d", 7, save=True)
 
     # # 45 days, hourly resolution
     # fetch_historical_data(symbol, "1h", 45, save=True)
 
-    # # 45 days, 15m resolution
+    # 45 days, 15m resolution
     # fetch_historical_data(symbol, "15m", 45, save=True)
 
 
