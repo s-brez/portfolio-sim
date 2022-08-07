@@ -736,11 +736,13 @@ class TestPortfolio():
     def equity_curve(self) -> None:
         pass
 
-    def post_simulation_analysis(self) -> None:
+    def post_simulation_analysis(self, save=True) -> None:
         self.metrics(display=False)             # 1. get baseline per-trade stats
         self.strategy_metrics(display=False)    # 2. derive indidivudal metrics from base stats
         self.metrics(display=False)             # 3. do portfolio calcs requiring indidividual stats
-        self.save_results_to_file()
+
+        if save:
+            self.save_results_to_file()
 
     def save_results_to_file(self) -> None:
         if not os.path.exists('results'):
