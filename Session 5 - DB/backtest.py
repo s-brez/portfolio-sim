@@ -249,7 +249,7 @@ class Backtester:
         self.portfolio.finish_date = df.iloc[-1].name
 
         # print(self.portfolio.parameter_summary())
-        print(f"\nRunning simulation for {self.portfolio.name}...")
+        print(f"Running simulation for {self.portfolio.name}...")
 
         # Iterate dataframes timestamp by timestamp.
         for index in range(start_index, finish_index - 1):
@@ -288,10 +288,11 @@ class Backtester:
                             self.process_signal(signal)
         # TODO:
         # DB integration.
+        # Auto update data on start.
         # Modify portfolio to get p_win values from DB for kelly sizing.
         # 2nd test strategy.
         # Restructure portfolio to use an parent abstract class for static methods.
         # Add equity curve display option.
 
         self.portfolio.post_simulation_analysis(save)
-        print("Simulation complete.")
+        print("Simulation complete.\n")
