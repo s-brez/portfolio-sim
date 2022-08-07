@@ -12,6 +12,9 @@ p_win = 0
 
 stats = []
 
+# for strategy in data:
+#     print(json.dumps(strategy[list(strategy.keys())[0]], indent=2))
+
 for strategy in data:
 
     count = 0
