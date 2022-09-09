@@ -17,7 +17,7 @@ class EMACross1020:
         """
         slow_ema = data['Close'].ewm(span=slow, adjust=False).mean().rename('EMA20')
         fast_ema = data['Close'].ewm(span=fast, adjust=False).mean().rename('EMA10')
-        cross = pd.Series(None, index=data.index).rename("Cross")
+        cross = pd.Series(None, index=data.index, dtype="object").rename("Cross")
 
         # Populate cross column.
         # If using timeframes more granular than 1d you'll want to optimise this to cut processing time.
