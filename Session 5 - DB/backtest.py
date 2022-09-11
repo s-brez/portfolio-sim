@@ -1,12 +1,14 @@
 from os import listdir
 import pandas as pd
-import json
+import psycopg2
 
 # pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', None)
 
+
+DB_TABLES = ['asset_classes', 'exchanges', 'assets', 'prices', 'strategy_results', 'portfolio_results']
 
 TIMEFRAMES = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]
 INTRADAILY_TIMEFRAMES = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"]
@@ -27,6 +29,7 @@ class Backtester:
         self.portfolio = portfolio
         self.c_matrix = None
         self.active = True
+        self.db_conn = None
 
     def load_local_data(self, symbols: list) -> dict:
         """
@@ -234,6 +237,9 @@ class Backtester:
 
         strategies = [s['object'] for s in self.portfolio.strategies.values()]
 
+        # Connect to postgres
+        self.db_conn = psycopg2.connect(host="localhost", database="portfolio_sim", user="postgres", password="")
+
         # Do pre-processing.
         self.apply_features_all_datasets(self.data, strategies, self.portfolio.assets_flattened)
         self.c_matrix = self.correlation_matrix(self.data, self.portfolio.timeframes, self.portfolio.assets_flattened)
@@ -287,12 +293,11 @@ class Backtester:
                             signal['strategy'] = strategy.name
                             self.process_signal(signal)
         # TODO:
-        # DB integration.
         # Auto update data on start.
         # Modify portfolio to get p_win values from DB for kelly sizing.
         # 2nd test strategy.
         # Restructure portfolio to use an parent abstract class for static methods.
         # Add equity curve display option.
 
-        self.portfolio.post_simulation_analysis(save)
+        self.portfolio.post_simulation_analysis(save, self.db_conn, DB_TABLES)
         print("Simulation complete.\n")
