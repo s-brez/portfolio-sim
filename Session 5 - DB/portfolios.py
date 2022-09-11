@@ -2,7 +2,10 @@ from dateutil.relativedelta import relativedelta
 from datetime import datetime, timedelta
 from statistics import pstdev, stdev, mean
 import pandas as pd
+import collections
 import json
+import sys
+import traceback
 import os
 
 from strategies import EMACross1020
@@ -30,6 +33,7 @@ class TestPortfolio():
 
         self.max_simultaneous_positions = 10
         self.correlation_threshold = 1              # 1 for simplicity, allowing correlated trades
+        self.max_correlated_positions = 4
 
         self.drawdown_limit_percentage = 15         # percentage loss of starting capital trading will cease at
         self.drawdown_watermark = self.current_equity
@@ -567,7 +571,7 @@ class TestPortfolio():
             "open_trades": self.position_count, "closed_trades": self.total_trades,
             "winners": self.total_winners, "losers": self.total_losers, "win_loss": win_loss, "p_win": p_win,
             "avg_size": avg_size, "avg_size_winner": avg_size_winner, "avg_size_loser": avg_size_loser,
-            "avg_r": r_portfolio, "avg_r_winner": avg_r_winner, "avg_r_winner": avg_r_loser,
+            "avg_r": r_portfolio, "avg_r_winner": avg_r_winner, "avg_r_loser": avg_r_loser,
             "expectancy": expectancy, "exp_return": exp_return,
             "std_dev_returns": std_dev_returns, "std_dev_downside_returns": std_dev_downside_returns,
             "sharpe": sharpe, "sortino": sortino,
@@ -736,13 +740,16 @@ class TestPortfolio():
     def equity_curve(self) -> None:
         pass
 
-    def post_simulation_analysis(self, save=True) -> None:
+    def post_simulation_analysis(self, save=True, db_conn=None, DB_TABLES=None) -> None:
         self.metrics(display=False)             # 1. get baseline per-trade stats
         self.strategy_metrics(display=False)    # 2. derive indidivudal metrics from base stats
         self.metrics(display=False)             # 3. do portfolio calcs requiring indidividual stats
 
         if save:
             self.save_results_to_file()
+
+        if db_conn:
+            self.save_results_to_db(db_conn, DB_TABLES)
 
     def save_results_to_file(self) -> None:
         if not os.path.exists('results'):
@@ -771,6 +778,36 @@ class TestPortfolio():
         output = json.dumps(self.transaction_history, default=str)
         with open("results/" + path + "transactions.json", "w", encoding="utf-8") as file:
             json.dump(output, file, ensure_ascii=False, indent=2)
+
+    def save_results_to_db(self, db_conn, DB_TABLES) -> None:
+
+        cursor = db_conn.cursor()
+        cursor.execute("""SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'""")
+        tables = [table[0] for table in cursor.fetchall()]
+
+        # Check tables exists
+        if not collections.Counter(DB_TABLES) == collections.Counter(tables):
+            print("Tables not found. Creating tables..")
+            os.system('python create_tables.py')
+
+        # Save results to DB
+        query = "INSERT INTO portfolio_results (name, start, finish, timeframes, strategies, assets, max_correlated_positions, max_open_positions, flat_fee, percent_fee, kelly, flat_risk_non_kelly, drawdown_limit, allocation_asset_class, allocation_strategy, start_equity, realised_equity, open_equity, final_equity, return, avg_return, high_watermark, drawdown_watermark, fees_paid, gross_profit, gross_loss, net_profit, avg_hold_time, avg_hold_time_winner, avg_hold_time_loser, open_trades, closed_trades, winners, losers, win_loss, p_win, expectancy, expected_return, avg_size_winner, avg_size_loser, avg_size, avg_r, avg_r_winner, avg_r_loser, std_dev_returns, std_dev_downside_returns, sharpe, sortino) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+        record = (
+            self.name, str(self.start_date), str(self.finish_date), self.timeframes, [s for s in self.strategies], self.assets_flattened,
+            self.max_correlated_positions, self.max_simultaneous_positions, self.simulated_fee_flat, self.simulated_fee_percentage,
+            self.use_kelly, self.max_risk_per_trade_percentage, self.drawdown_limit_percentage, None, None, self.report['start_equity'],
+            self.report['final_equity'], self.open_equity, self.report['final_equity'], self.report['return'], self.report['avg_return'],
+            self.report['high_watermark'], self.report['drawdown_watermark'], self.report['fees_paid'], self.report['gross_profit'], self.report['gross_loss'],
+            self.report['gross_profit'] - self.report['gross_loss'], str(self.report['avg_hold_time']), str(self.report['avg_hold_time_winner']),
+            str(self.report['avg_hold_time_loser']), self.report['open_trades'], self.report['closed_trades'], self.report['winners'],
+            self.report['losers'], self.report['win_loss'], self.report['p_win'], self.report['expectancy'], self.report['exp_return'],
+            self.report['avg_size_winner'], self.report['avg_size_loser'], self.report['avg_size'], self.report['avg_r'],
+            self.report['avg_r_winner'], self.report['avg_r_loser'], self.report['std_dev_returns'], self.report['std_dev_downside_returns'],
+            self.report['sharpe'], self.report['sortino']
+        )
+
+        cursor.execute(query, record)
+        db_conn.commit()
 
     def parameter_summary(self) -> str:
         return (
