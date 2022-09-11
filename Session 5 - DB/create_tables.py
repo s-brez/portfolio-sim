@@ -1,12 +1,8 @@
 import psycopg2
 
 
-connection = psycopg2.connect(host="localhost", database="portfolio_sim", user="postgres", password="niglet")
-
-# Database "portfolio_sim" must already exist.
+connection = psycopg2.connect(host="localhost", database="portfolio_sim", user="postgres", password="")
 cursor = connection.cursor()
-# cursor.execute("""SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'""")
-# result = cursor.fetchall()
 
 cursor.execute("DROP TABLE IF EXISTS exchanges CASCADE")
 cursor.execute("DROP TABLE IF EXISTS asset_classes CASCADE")
@@ -16,7 +12,6 @@ cursor.execute("DROP TABLE IF EXISTS strategy_results CASCADE")
 cursor.execute("DROP TYPE IF EXISTS allocation_asset_class CASCADE")
 cursor.execute("DROP TYPE IF EXISTS allocation_strategy CASCADE")
 cursor.execute("DROP TABLE IF EXISTS portfolio_results CASCADE")
-
 
 cursor.execute("""
     CREATE TABLE exchanges
@@ -127,7 +122,7 @@ cursor.execute("""
         finish timestamp NOT NULL,
         timeframes varchar[] NOT NULL,
         strategies varchar[] NOT NULL,
-        assets int[] NOT NULL,
+        assets varchar[] NOT NULL,
         max_correlated_positions int NOT NULL,
         max_open_positions int NOT NULL,
         flat_fee real NOT NULL,
@@ -135,8 +130,8 @@ cursor.execute("""
         kelly bool NOT NULL,
         flat_risk_non_kelly real NOT NULL,
         drawdown_limit real NOT NULL,
-        allocation_asset_class allocation_asset_class[] NOT NULL,
-        allocation_strategy allocation_strategy[] NOT NULL,
+        allocation_asset_class allocation_asset_class[],
+        allocation_strategy allocation_strategy[],
         start_equity real NOT NULL,
         realised_equity real NOT NULL,
         open_equity real NOT NULL,
@@ -149,9 +144,9 @@ cursor.execute("""
         gross_profit real NOT NULL,
         gross_loss real NOT NULL,
         net_profit real NOT NULL,
-        avg_hold_time interval NOT NULL,
-        avg_hold_time_winner interval NOT NULL,
-        avg_hold_time_loser interval NOT NULL,
+        avg_hold_time varchar NOT NULL,
+        avg_hold_time_winner varchar NOT NULL,
+        avg_hold_time_loser varchar NOT NULL,
         open_trades int NOT NULL,
         closed_trades int NOT NULL,
         winners int NOT NULL,
@@ -160,8 +155,6 @@ cursor.execute("""
         p_win real NOT NULL,
         expectancy real NOT NULL,
         expected_return real NOT NULL,
-        largest_winner real NOT NULL,
-        largest_loser real NOT NULL,
         avg_size_winner real NOT NULL,
         avg_size_loser real NOT NULL,
         avg_size real NOT NULL,
@@ -175,9 +168,6 @@ cursor.execute("""
         PRIMARY KEY (name)
     );
 """)
-
-
-
 
 connection.commit()
 connection.close()
